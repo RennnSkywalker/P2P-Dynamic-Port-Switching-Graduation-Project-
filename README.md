@@ -44,12 +44,4 @@ Proje, dökümanlarda (SDD) tanımlanan 7 ana modül üzerine kuruludur:
 ## 🚀 Kullanım (Usage)
 Proje bir `Makefile` kullanılarak derlenir ve CLI parametreleri ile çalıştırılır.
 
-```bash
-# Projeyi derleyin
-make
 
-# Peer 0 (Listener/Dialer rolleri otomatik belirlenir)
-./dps_system --secretKey "shared_secret" --peer-id 0 --interval 30 --port-range 20000-30000
-
-# Peer 1
-./dps_system --secretKey "shared_secret" --peer-id 1 --interval 30 --port-range 20000-30000
