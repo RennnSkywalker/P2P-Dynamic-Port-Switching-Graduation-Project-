@@ -1,33 +1,35 @@
 /**
  * @file comm_controller.c
- * @brief Module 1 — Communication Controller (Implementation)
+ * @brief Modül 1 — İletişim Denetleyici (Uygulama)
  *
- * Full POSIX C11 implementation of the Communication Controller.
- * See comm_controller.h for the public API and design rationale.
+ * İletişim Denetleyici'nin tam POSIX C11 uygulaması.
+ * Genel API ve tasarım gerekçesi için comm_controller.h dosyasına bakın.
  *
- * SDD Reference: §4.1, §5.1 (Communication Controller Flow)
- * SRS Reference: FR8, §3.5.1 (< 5 ms), §3.5.4, §3.5.5
+ * SDD Referansı: §4.1, §5.1 (İletişim Denetleyici Akışı)
+ * SRS Referansı: FR8, §3.5.1 (< 5 ms), §3.5.4, §3.5.5
  *
- * Build:
+ * Derleme:
  *   gcc -std=c11 -Wall -Wextra -pedantic -pthread \
  *       comm_controller.c -o libcommctrl.o -c
  *
- * Notes:
- *   - All socket I/O uses blocking calls.  Non-blocking / async I/O may be
- *     added in a future version without changing the public API.
- *   - The outgoing ring-buffer is intentionally simple (byte-granular) to
- *     keep the handover logic auditable.
- *   - Module 3 (port_mgmt.c) and Module 4 (timing_sync.c) are referenced
- *     via weak-symbol stubs so this TU compiles standalone.
+ * Notlar:
+ *   - Tüm soket G/Ç işlemleri engelleyen (blocking) çağrılar kullanır.
+ *     Engellemesiz / asenkron G/Ç, genel API değiştirilmeden ileriye
+ *     dönük bir sürümde eklenebilir.
+ *   - Giden halka arabelleği, devirme mantığının denetlenebilirliğini
+ *     korumak amacıyla kasıtlı olarak sade (bayt granüllü) tutulmuştur.
+ *   - Modül 3 (port_mgmt.c) ve Modül 4 (timing_sync.c) zayıf sembol
+ *     taslakları aracılığıyla başvurulmaktadır; bu sayede bu derleme
+ *     birimi bağımsız olarak derlenir.
  */
 
 /* =========================================================================
- * Feature-test macros — must precede all other includes
+ * Özellik test makroları — tüm diğer include'lardan önce gelmeli
  * ========================================================================= */
 #define _POSIX_C_SOURCE 200809L
 
 /* =========================================================================
- * Includes
+ * Kütüphane dahil etmeleri
  * ========================================================================= */
 #include "comm_controller.h"
 
@@ -35,38 +37,37 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <time.h>          /* clock_gettime, nanosleep            */
-#include <unistd.h>        /* close(), read(), write()            */
+#include <time.h>          /* clock_gettime, nanosleep                   */
+#include <unistd.h>        /* close(), read(), write()                   */
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 
 /* =========================================================================
- * Weak stubs for external module linkage (Module 3 & 4)
+ * Dışsal modül bağlantısı için zayıf taslaklar (Modül 3 & 4)
  *
- * These are compiled as __attribute__((weak)) so that when port_mgmt.c and
- * timing_sync.c are linked in, their strong symbols take precedence without
- * a linker error.
+ * __attribute__((weak)) ile derlenir; port_mgmt.c ve timing_sync.c
+ * bağlandığında güçlü sembolleri öncelik kazanır, bağlayıcı hatası oluşmaz.
  * ========================================================================= */
 
 __attribute__((weak)) uint16_t cc_extern_get_target_port(void)
 {
-    /* Placeholder — returns 0 until Module 3 is linked. */
+    /* Yer tutucu — Modül 3 bağlanana kadar 0 döndürür. */
     return 0;
 }
 
 __attribute__((weak)) uint64_t cc_extern_get_time_step(void)
 {
-    /* Placeholder — returns Unix seconds until Module 4 is linked. */
+    /* Yer tutucu — Modül 4 bağlanana kadar Unix saniyelerini döndürür. */
     return (uint64_t)time(NULL);
 }
 
 /* =========================================================================
- * Internal logging helpers
+ * Dahili günlük yardımcıları
  * ========================================================================= */
 
-/** Log prefix tokens matching the SDD §3.1.x console format. */
+/** SDD §3.1.x konsol biçimiyle eşleşen günlük ön eki belirteçleri. */
 #define LOG_INFO(fmt, ...)  \
     fprintf(stderr, "[INFO]  " fmt "\n", ##__VA_ARGS__)
 #define LOG_WARN(fmt, ...)  \
@@ -81,12 +82,12 @@ __attribute__((weak)) uint64_t cc_extern_get_time_step(void)
     fprintf(stderr, "[UDP]   " fmt "\n", ##__VA_ARGS__)
 
 /* =========================================================================
- * Internal helper — millisecond monotonic clock
+ * Dahili yardımcı — milisaniye cinsinden monoton saat
  * ========================================================================= */
 
 /**
- * @brief Return current monotonic time in milliseconds.
- * @return ms since some unspecified epoch (suitable for relative durations).
+ * @brief Milisaniye cinsinden güncel monoton zamanı döndürür.
+ * @return Belirtilmemiş bir referans noktasından itibaren ms (göreli süreler için uygundur).
  */
 static uint64_t now_ms(void)
 {
@@ -96,8 +97,8 @@ static uint64_t now_ms(void)
 }
 
 /**
- * @brief Sleep for a given number of milliseconds.
- * @param ms Milliseconds to sleep (approximate).
+ * @brief Belirtilen milisaniye kadar uyutur.
+ * @param ms Uyunacak süre (milisaniye, yaklaşık).
  */
 static void sleep_ms(unsigned int ms)
 {
@@ -108,12 +109,12 @@ static void sleep_ms(unsigned int ms)
 }
 
 /* =========================================================================
- * Internal helper — reliable send / recv wrappers
+ * Dahili yardımcı — güvenilir gönderme / alma sarmalayıcıları
  * ========================================================================= */
 
 /**
- * @brief Write exactly `len` bytes to `fd`, retrying on EINTR.
- * @return `len` on success, -1 on error or peer disconnect.
+ * @brief `fd`'ye tam olarak `len` bayt yazar; EINTR durumunda yeniden dener.
+ * @return Başarıda `len`, hata veya bağlantı kesilmesinde -1.
  */
 static ssize_t write_all(int fd, const void *buf, size_t len)
 {
@@ -133,8 +134,8 @@ static ssize_t write_all(int fd, const void *buf, size_t len)
 }
 
 /**
- * @brief Read exactly `len` bytes from `fd`, retrying on EINTR.
- * @return `len` on success, 0 on clean disconnect, -1 on error.
+ * @brief `fd`'den tam olarak `len` bayt okur; EINTR durumunda yeniden dener.
+ * @return Başarıda `len`, temiz bağlantı kesilmesinde 0, hata durumunda -1.
  */
 static ssize_t read_all(int fd, void *buf, size_t len)
 {
@@ -143,7 +144,7 @@ static ssize_t read_all(int fd, void *buf, size_t len)
 
     while (remaining > 0) {
         ssize_t n = read(fd, ptr, remaining);
-        if (n == 0) return 0;  /* EOF / peer disconnected */
+        if (n == 0) return 0;  /* EOF / eş bağlantısını kesti */
         if (n < 0) {
             if (errno == EINTR) continue;
             return -1;
@@ -155,38 +156,38 @@ static ssize_t read_all(int fd, void *buf, size_t len)
 }
 
 /* =========================================================================
- * Internal helper — ring-buffer flush
+ * Dahili yardımcı — halka arabelleği boşaltma
  *
- * Sends all bytes currently in cc->send_buf through the active socket.
- * Must be called with cc->lock held.
+ * cc->send_buf içindeki tüm baytları etkin soket üzerinden gönderir.
+ * cc->lock tutularak çağrılmalıdır.
  * ========================================================================= */
 static int flush_send_buf(CommController *cc)
 {
     if (cc->buf_count == 0 || cc->active_fd < 0)
         return 0;
 
-    /* The ring-buffer may wrap around; handle in up to two chunks. */
+    /* Halka arabelleği sarabilir; en fazla iki parça halinde işle. */
     uint32_t chunk1_start = cc->buf_tail;
     uint32_t chunk1_len;
     uint32_t chunk2_len;
 
     if (cc->buf_head > cc->buf_tail) {
-        /* Contiguous */
+        /* Ardışık (sarmıyor) */
         chunk1_len = cc->buf_count;
         chunk2_len = 0;
     } else {
-        /* Wraps: from tail to end-of-buffer, then from 0 to head */
+        /* Sarıyor: kuyruktan arabellek sonuna, ardından 0'dan başa */
         chunk1_len = SEND_BUF_SIZE - cc->buf_tail;
         chunk2_len = cc->buf_head;
     }
 
     if (write_all(cc->active_fd, cc->send_buf + chunk1_start, chunk1_len) < 0) {
-        LOG_WARN("flush_send_buf: write error on chunk1 — %s", strerror(errno));
+        LOG_WARN("flush_send_buf: 1. parçada yazma hatası — %s", strerror(errno));
         return -1;
     }
     if (chunk2_len > 0) {
         if (write_all(cc->active_fd, cc->send_buf, chunk2_len) < 0) {
-            LOG_WARN("flush_send_buf: write error on chunk2 — %s", strerror(errno));
+            LOG_WARN("flush_send_buf: 2. parçada yazma hatası — %s", strerror(errno));
             return -1;
         }
     }
@@ -198,7 +199,7 @@ static int flush_send_buf(CommController *cc)
 }
 
 /* =========================================================================
- * Public API — Lifecycle
+ * Genel API — Yaşam Döngüsü
  * ========================================================================= */
 
 int cc_init(CommController *cc, const char *target_ip, int is_listener)
@@ -214,20 +215,20 @@ int cc_init(CommController *cc, const char *target_ip, int is_listener)
     cc->state        = STATE_IDLE;
     cc->is_listener  = is_listener;
 
-    /* Store target IP; strncpy guarantees NUL termination via memset above. */
+    /* Hedef IP'yi sakla; memset sayesinde strncpy NUL sonlandırmasını garanti eder. */
     strncpy(cc->target_ip, target_ip, INET_ADDRSTRLEN - 1);
 
-    /* EWMA starting values — assume best-case network. */
+    /* EWMA başlangıç değerleri — en iyi durum ağ koşullarını varsay. */
     cc->avg_latency_ms   = 0.0;
     cc->packet_loss_pct  = 0.0;
 
     if (pthread_mutex_init(&cc->lock, NULL) != 0) {
-        LOG_ERROR("cc_init: pthread_mutex_init failed — %s", strerror(errno));
+        LOG_ERROR("cc_init: pthread_mutex_init basarisiz — %s", strerror(errno));
         return -1;
     }
 
-    LOG_INFO("cc_init: controller ready (role=%s, peer=%s)",
-             is_listener ? "LISTENER" : "DIALER", target_ip);
+    LOG_INFO("cc_init: denetleyici hazir (rol=%s, es=%s)",
+             is_listener ? "DINLEYICI" : "ARAYICI", target_ip);
     return 0;
 }
 
@@ -239,33 +240,33 @@ void cc_teardown(CommController *cc)
 
     pthread_mutex_destroy(&cc->lock);
 
-    /* Zero entire struct so stale file descriptors cannot be reused. */
+    /* Eski dosya tanımlayıcılarının yeniden kullanılmaması için tüm yapıyı sıfırla. */
     memset(cc, 0, sizeof(CommController));
     cc->active_fd = -1;
 
-    LOG_INFO("cc_teardown: controller destroyed");
+    LOG_INFO("cc_teardown: denetleyici kapatildi");
 }
 
 /* =========================================================================
- * Public API — Socket Management
+ * Genel API — Soket Yönetimi
  * ========================================================================= */
 
 int cc_create_tcp_socket(CommController *cc, uint16_t port)
 {
     if (!cc) { errno = EINVAL; return -1; }
 
-    /* Close any previously open socket. */
+    /* Daha önce açık olan soketi kapat. */
     if (cc->active_fd >= 0)
         cc_close_socket(cc);
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
-        LOG_ERROR("cc_create_tcp_socket: socket() failed — %s", strerror(errno));
+        LOG_ERROR("cc_create_tcp_socket: socket() basarisiz — %s", strerror(errno));
         cc->state = STATE_ERROR;
         return -1;
     }
 
-    /* Allow rapid rebind after a switch (avoids TIME_WAIT issues). */
+    /* Geçişin ardından hızlı yeniden bağlamaya izin ver (TIME_WAIT sorununu önler). */
     int opt = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
@@ -274,52 +275,52 @@ int cc_create_tcp_socket(CommController *cc, uint16_t port)
     addr.sin_family = AF_INET;
 
     if (cc->is_listener) {
-        /* ---- Listener: bind → listen → accept ----------------------------- */
+        /* ---- Dinleyici: bind → listen → accept ---------------------------- */
         addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port        = htons(port);
 
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            LOG_ERROR("cc_create_tcp_socket: bind(%u) failed — %s",
+            LOG_ERROR("cc_create_tcp_socket: bind(%u) basarisiz — %s",
                       port, strerror(errno));
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
         }
         if (listen(fd, TCP_BACKLOG) < 0) {
-            LOG_ERROR("cc_create_tcp_socket: listen() failed — %s", strerror(errno));
+            LOG_ERROR("cc_create_tcp_socket: listen() basarisiz — %s", strerror(errno));
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
         }
 
-        LOG_TCP("Listening on port %u — waiting for dialer...", port);
+        LOG_TCP("%u numarali portta dinleniyor — arayici bekleniyor...", port);
 
         int client_fd = accept(fd, NULL, NULL);
         if (client_fd < 0) {
-            LOG_ERROR("cc_create_tcp_socket: accept() failed — %s", strerror(errno));
+            LOG_ERROR("cc_create_tcp_socket: accept() basarisiz — %s", strerror(errno));
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
         }
 
-        /* We only need the accepted socket from here on; close the server fd. */
+        /* Bundan sonra yalnızca kabul edilen soket gereklidir; sunucu fd'yi kapat. */
         close(fd);
         fd = client_fd;
 
     } else {
-        /* ---- Dialer: connect ---------------------------------------------- */
+        /* ---- Arayıcı: connect --------------------------------------------- */
         if (inet_pton(AF_INET, cc->target_ip, &addr.sin_addr) <= 0) {
-            LOG_ERROR("cc_create_tcp_socket: inet_pton('%s') failed", cc->target_ip);
+            LOG_ERROR("cc_create_tcp_socket: inet_pton('%s') basarisiz", cc->target_ip);
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
         }
         addr.sin_port = htons(port);
 
-        LOG_TCP("Connecting to %s:%u ...", cc->target_ip, port);
+        LOG_TCP("%s:%u adresine baglaniliyor...", cc->target_ip, port);
 
         if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            LOG_ERROR("cc_create_tcp_socket: connect(%s:%u) failed — %s",
+            LOG_ERROR("cc_create_tcp_socket: connect(%s:%u) basarisiz — %s",
                       cc->target_ip, port, strerror(errno));
             close(fd);
             cc->state = STATE_ERROR;
@@ -332,7 +333,7 @@ int cc_create_tcp_socket(CommController *cc, uint16_t port)
     cc->target_port  = port;
     cc->state        = STATE_CONNECTED;
 
-    LOG_TCP("Connected on port %u (fd=%d)", port, fd);
+    LOG_TCP("%u numarali portta baglandi (fd=%d)", port, fd);
     return 0;
 }
 
@@ -345,7 +346,7 @@ int cc_create_udp_socket(CommController *cc, uint16_t port)
 
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
-        LOG_ERROR("cc_create_udp_socket: socket() failed — %s", strerror(errno));
+        LOG_ERROR("cc_create_udp_socket: socket() basarisiz — %s", strerror(errno));
         cc->state = STATE_ERROR;
         return -1;
     }
@@ -358,23 +359,23 @@ int cc_create_udp_socket(CommController *cc, uint16_t port)
     addr.sin_family = AF_INET;
 
     if (cc->is_listener) {
-        /* ---- Listener: bind to port so datagrams arrive here -------------- */
+        /* ---- Dinleyici: veri birimlerinin gelmesi için porta bağlan ------- */
         addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port        = htons(port);
 
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            LOG_ERROR("cc_create_udp_socket: bind(%u) failed — %s",
+            LOG_ERROR("cc_create_udp_socket: bind(%u) basarisiz — %s",
                       port, strerror(errno));
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
         }
-        LOG_UDP("Bound (listener) on port %u (fd=%d)", port, fd);
+        LOG_UDP("Dinleyici olarak %u numarali porta baglandi (fd=%d)", port, fd);
 
     } else {
-        /* ---- Dialer: connect() sets default remote addr for send()/recv() - */
+        /* ---- Arayıcı: connect() send()/recv() icin varsayilan uzak adresi ayarlar */
         if (inet_pton(AF_INET, cc->target_ip, &addr.sin_addr) <= 0) {
-            LOG_ERROR("cc_create_udp_socket: inet_pton('%s') failed", cc->target_ip);
+            LOG_ERROR("cc_create_udp_socket: inet_pton('%s') basarisiz", cc->target_ip);
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
@@ -382,13 +383,13 @@ int cc_create_udp_socket(CommController *cc, uint16_t port)
         addr.sin_port = htons(port);
 
         if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            LOG_ERROR("cc_create_udp_socket: connect(%s:%u) failed — %s",
+            LOG_ERROR("cc_create_udp_socket: connect(%s:%u) basarisiz — %s",
                       cc->target_ip, port, strerror(errno));
             close(fd);
             cc->state = STATE_ERROR;
             return -1;
         }
-        LOG_UDP("Packet dispatched to %s:%u (fd=%d)", cc->target_ip, port, fd);
+        LOG_UDP("Paket %s:%u adresine gonderildi (fd=%d)", cc->target_ip, port, fd);
     }
 
     cc->active_fd    = fd;
@@ -402,11 +403,11 @@ void cc_close_socket(CommController *cc)
 {
     if (!cc || cc->active_fd < 0) return;
 
-    /* Graceful TCP teardown (no-op for UDP but harmless). */
+    /* Zarif TCP kapanışı (UDP için işlemsiz ancak zararsız). */
     shutdown(cc->active_fd, SHUT_RDWR);
     close(cc->active_fd);
 
-    LOG_INFO("cc_close_socket: fd=%d closed (was %s on port %u)",
+    LOG_INFO("cc_close_socket: fd=%d kapatildi (%s, port %u)",
              cc->active_fd,
              cc->active_proto == PROTO_TCP ? "TCP" : "UDP",
              cc->target_port);
@@ -416,8 +417,8 @@ void cc_close_socket(CommController *cc)
 }
 
 /* =========================================================================
- * Public API — Protocol Switching (Handover)
- * SDD §5.1 Switch Execution sequence
+ * Genel API — Protokol Değiştirme (Devirme / Handover)
+ * SDD §5.1 Anahtar Yürütme sırası
  * ========================================================================= */
 
 int cc_switch_protocol(CommController *cc, Protocol new_proto, uint16_t new_port)
@@ -428,12 +429,13 @@ int cc_switch_protocol(CommController *cc, Protocol new_proto, uint16_t new_port
     cc->state = STATE_SWITCHING;
     pthread_mutex_unlock(&cc->lock);
 
-    LOG_INFO("cc_switch_protocol: initiating handover → %s port %u",
+    LOG_INFO("cc_switch_protocol: devirme baslatiliyor → %s port %u",
              new_proto == PROTO_TCP ? "TCP" : "UDP", new_port);
 
     /* ------------------------------------------------------------------
-     * Step 1 — Drain the outgoing queue
-     * Spin-wait up to HANDOVER_DRAIN_TIMEOUT_MS for pending data to be sent.
+     * Adım 1 — Giden kuyruğu boşalt
+     * Bekleyen verilerin gönderilmesi için HANDOVER_DRAIN_TIMEOUT_MS'ye kadar
+     * döngüsel bekleme yapılır.
      * ------------------------------------------------------------------ */
     uint64_t deadline = now_ms() + HANDOVER_DRAIN_TIMEOUT_MS;
     while (now_ms() < deadline) {
@@ -445,19 +447,19 @@ int cc_switch_protocol(CommController *cc, Protocol new_proto, uint16_t new_port
     }
 
     if (cc->buf_count > 0) {
-        LOG_WARN("cc_switch_protocol: queue not fully drained (%u bytes lost)",
+        LOG_WARN("cc_switch_protocol: kuyruk tam olarak boşaltılamadı (%u bayt kayboldu)",
                  cc->buf_count);
     }
 
     /* ------------------------------------------------------------------
-     * Step 2 — Close the old socket
+     * Adım 2 — Eski soketi kapat
      * ------------------------------------------------------------------ */
     pthread_mutex_lock(&cc->lock);
     cc_close_socket(cc);
     pthread_mutex_unlock(&cc->lock);
 
     /* ------------------------------------------------------------------
-     * Step 3 — Open the new socket
+     * Adım 3 — Yeni soketi aç
      * ------------------------------------------------------------------ */
     int rc;
     if (new_proto == PROTO_TCP)
@@ -466,8 +468,8 @@ int cc_switch_protocol(CommController *cc, Protocol new_proto, uint16_t new_port
         rc = cc_create_udp_socket(cc, new_port);
 
     if (rc < 0) {
-        LOG_ERROR("cc_switch_protocol: failed to open new %s socket on port %u",
-                  new_proto == PROTO_TCP ? "TCP" : "UDP", new_port);
+        LOG_ERROR("cc_switch_protocol: %u portunda yeni %s soketi açilamadi",
+                  new_port, new_proto == PROTO_TCP ? "TCP" : "UDP");
         pthread_mutex_lock(&cc->lock);
         cc->state = STATE_ERROR;
         pthread_mutex_unlock(&cc->lock);
@@ -475,22 +477,22 @@ int cc_switch_protocol(CommController *cc, Protocol new_proto, uint16_t new_port
     }
 
     /* ------------------------------------------------------------------
-     * Step 4 — Flush any messages buffered during handover
+     * Adım 4 — Devirme sırasında arabelleklenen mesajları gönder
      * ------------------------------------------------------------------ */
     pthread_mutex_lock(&cc->lock);
     if (flush_send_buf(cc) < 0) {
-        LOG_WARN("cc_switch_protocol: flush_send_buf partial failure");
+        LOG_WARN("cc_switch_protocol: flush_send_buf kismi hata");
     }
     cc->state = STATE_CONNECTED;
     pthread_mutex_unlock(&cc->lock);
 
-    LOG_INFO("cc_switch_protocol: handover complete → %s port %u",
+    LOG_INFO("cc_switch_protocol: devirme tamamlandi → %s port %u",
              new_proto == PROTO_TCP ? "TCP" : "UDP", new_port);
     return 0;
 }
 
 /* =========================================================================
- * Public API — Send / Receive
+ * Genel API — Gönderme / Alma
  * ========================================================================= */
 
 int cc_send(CommController *cc, MsgType type, uint32_t seq,
@@ -500,7 +502,7 @@ int cc_send(CommController *cc, MsgType type, uint32_t seq,
     if (payload_len > MAX_PAYLOAD_LEN) { errno = EMSGSIZE; return -1; }
     if (!MSG_TYPE_VALID(type)) { errno = EINVAL; return -1; }
 
-    /* Build header in host byte order, then convert to network byte order. */
+    /* Başlığı host bayt sırasında oluştur, ardından ağ bayt sırasına dönüştür. */
     pkt_header_t hdr;
     pkt_hdr_init(&hdr);
     hdr.msg_type    = (uint8_t)type;
@@ -508,16 +510,16 @@ int cc_send(CommController *cc, MsgType type, uint32_t seq,
     hdr.payload_len = payload_len;
     pkt_hdr_to_network(&hdr);
 
-    /* Write header first. */
+    /* Önce başlığı yaz. */
     if (write_all(cc->active_fd, &hdr, PKT_HEADER_SIZE) < 0) {
-        LOG_ERROR("cc_send: header write failed — %s", strerror(errno));
+        LOG_ERROR("cc_send: baslik yazma basarisiz — %s", strerror(errno));
         return -1;
     }
 
-    /* Write payload (if any). */
+    /* Yükü yaz (varsa). */
     if (payload_len > 0 && payload != NULL) {
         if (write_all(cc->active_fd, payload, payload_len) < 0) {
-            LOG_ERROR("cc_send: payload write failed — %s", strerror(errno));
+            LOG_ERROR("cc_send: yuk yazma basarisiz — %s", strerror(errno));
             return -1;
         }
     }
@@ -530,45 +532,45 @@ int cc_recv(CommController *cc, pkt_header_t *hdr_out,
 {
     if (!cc || cc->active_fd < 0 || !hdr_out) { errno = EBADF; return -1; }
 
-    /* Read exactly PKT_HEADER_SIZE bytes for the header. */
+    /* Başlık için tam olarak PKT_HEADER_SIZE bayt oku. */
     uint8_t raw_hdr[PKT_HEADER_SIZE];
     ssize_t n = read_all(cc->active_fd, raw_hdr, PKT_HEADER_SIZE);
     if (n <= 0) {
         if (n == 0)
-            LOG_INFO("cc_recv: peer disconnected");
+            LOG_INFO("cc_recv: es baglantisini kesti");
         else
-            LOG_ERROR("cc_recv: header read failed — %s", strerror(errno));
+            LOG_ERROR("cc_recv: baslik okuma basarisiz — %s", strerror(errno));
         return (int)n;
     }
 
-    /* Copy raw bytes into the struct (packed, so safe). */
+    /* Ham baytları yapıya kopyala (paketlenmiş, dolayısıyla güvenli). */
     memcpy(hdr_out, raw_hdr, PKT_HEADER_SIZE);
     pkt_hdr_from_network(hdr_out);
 
-    /* Sanity-check the decoded header. */
+    /* Çözümlenen başlığın bütünlük denetimi. */
     if (hdr_out->version != PROTO_VERSION) {
-        LOG_WARN("cc_recv: unexpected protocol version %u", hdr_out->version);
+        LOG_WARN("cc_recv: beklenmeyen protokol surumu %u", hdr_out->version);
     }
     if (!MSG_TYPE_VALID(hdr_out->msg_type)) {
-        LOG_WARN("cc_recv: unknown msg_type %u", hdr_out->msg_type);
+        LOG_WARN("cc_recv: bilinmeyen msg_type %u", hdr_out->msg_type);
     }
     if (hdr_out->payload_len > MAX_PAYLOAD_LEN) {
-        LOG_ERROR("cc_recv: payload_len %u exceeds MAX_PAYLOAD_LEN", hdr_out->payload_len);
+        LOG_ERROR("cc_recv: payload_len %u MAX_PAYLOAD_LEN sınırını aştı", hdr_out->payload_len);
         errno = EMSGSIZE;
         return -1;
     }
     if (hdr_out->payload_len > buf_size) {
-        LOG_ERROR("cc_recv: payload_len %u exceeds caller buffer %u",
+        LOG_ERROR("cc_recv: payload_len %u çağıran arabelleğini (%u) aştı",
                   hdr_out->payload_len, buf_size);
         errno = ENOBUFS;
         return -1;
     }
 
-    /* Read payload bytes. */
+    /* Yük baytlarını oku. */
     if (hdr_out->payload_len > 0) {
         ssize_t pn = read_all(cc->active_fd, payload_buf, hdr_out->payload_len);
         if (pn <= 0) {
-            LOG_ERROR("cc_recv: payload read failed — %s", strerror(errno));
+            LOG_ERROR("cc_recv: yuk okuma basarisiz — %s", strerror(errno));
             return -1;
         }
     }
@@ -577,9 +579,9 @@ int cc_recv(CommController *cc, pkt_header_t *hdr_out,
 }
 
 /* =========================================================================
- * Public API — Adaptive Logic (Automatic Mode)
- * SDD §5.2 — Protocol Decision Logic Flow
- * SRS  FR8  — Automatic Transport
+ * Genel API — Uyarlamalı Mantık (Otomatik Mod)
+ * SDD §5.2 — Protokol Karar Mantığı Akışı
+ * SRS  FR8  — Otomatik Taşıma
  * ========================================================================= */
 
 int cc_update_network_health(CommController *cc,
@@ -590,11 +592,11 @@ int cc_update_network_health(CommController *cc,
     pthread_mutex_lock(&cc->lock);
 
     /*
-     * Exponential Weighted Moving Average (EWMA):
-     *   new_avg = α × sample + (1 − α) × old_avg
+     * Üstel Ağırlıklı Hareketli Ortalama (EWMA):
+     *   yeni_ort = α × örnek + (1 − α) × eski_ort
      *
-     * Using α = HEALTH_EWMA_ALPHA (0.2) — low sensitivity to transient spikes.
-     * On first call (avg == 0.0) we seed with the first sample directly.
+     * α = HEALTH_EWMA_ALPHA (0.2) — geçici ani artışlara düşük duyarlılık.
+     * İlk çağrıda (avg == 0.0) ilk örnekle doğrudan tohumlanır.
      */
     if (cc->avg_latency_ms == 0.0 && cc->packet_loss_pct == 0.0) {
         cc->avg_latency_ms  = latency_ms;
@@ -621,24 +623,24 @@ int cc_check_adaptive_switch(CommController *cc, uint16_t new_port)
     pthread_mutex_unlock(&cc->lock);
 
     /*
-     * SDD §5.2 decision table:
-     *   CONGESTED: latency > 200 ms OR loss > 5 %  → prefer UDP
-     *   STABLE:    latency ≤ 200 ms AND loss ≤ 5 %  → prefer TCP
+     * SDD §5.2 karar tablosu:
+     *   TIKANIC: gecikme > 200 ms VEYA kayıp > %5  → UDP tercih et
+     *   KARARLI: gecikme ≤ 200 ms VE  kayıp ≤ %5  → TCP tercih et
      */
     int congested = (latency > LATENCY_THRESHOLD_MS || loss > LOSS_THRESHOLD_PCT);
 
     if (congested && proto == PROTO_TCP) {
-        LOG_AUTO("Congestion detected (latency=%.1fms, loss=%.1f%%). "
-                 "Switching TCP → UDP on port %u.", latency, loss, new_port);
+        LOG_AUTO("Tikaclilik tespit edildi (gecikme=%.1fms, kayip=%.1f%%). "
+                 "TCP → UDP gecisi port %u.", latency, loss, new_port);
         return cc_switch_protocol(cc, PROTO_UDP, new_port);
     }
 
     if (!congested && proto == PROTO_UDP) {
-        LOG_AUTO("Network stable (latency=%.1fms, loss=%.1f%%). "
-                 "Reverting UDP → TCP on port %u.", latency, loss, new_port);
+        LOG_AUTO("Ag kararli (gecikme=%.1fms, kayip=%.1f%%). "
+                 "UDP → TCP'ye geri donuluyor, port %u.", latency, loss, new_port);
         return cc_switch_protocol(cc, PROTO_TCP, new_port);
     }
 
-    /* No change needed. */
+    /* Değişiklik gerekmiyor. */
     return 0;
 }

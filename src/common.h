@@ -1,105 +1,105 @@
 /**
  * @file common.h
- * @brief Module 7 — Message/Packet Format Specification
+ * @brief Modül 7 — Mesaj/Paket Biçim Tanımlaması
  *
- * Defines the 10-byte custom protocol header used for all peer-to-peer
- * communications in the P2P Dynamic Port Switching system.
+ * P2P Dinamik Port Değiştirme sistemindeki tüm eşler arası iletişimde
+ * kullanılan 10 baytlık özel protokol başlığını tanımlar.
  *
- * Wire layout (big-endian / network byte order):
- *   Offset  Size  Field
- *   ------  ----  -----------
+ * Kablo üzeri düzen (big-endian / ağ bayt sırası):
+ *   Ofset  Boyut  Alan
+ *   -----  -----  -----------
  *    0      1 B   version      (uint8_t)
  *    1      1 B   msg_type     (uint8_t)
  *    2      4 B   seq_num      (uint32_t, big-endian)
  *    6      4 B   payload_len  (uint32_t, big-endian)
- *   ------  ----
- *   Total: 10 bytes
+ *   -----  -----
+ *   Toplam: 10 bayt
  *
- * SDD Reference: Section 4.7 — Module 7 — Message/Packet Format Specification
- * SRS Reference: Section 3.5.1 — Performance: all computations < 5 ms
+ * SDD Referansı: Bölüm 4.7 — Modül 7 — Mesaj/Paket Biçim Tanımlaması
+ * SRS Referansı: Bölüm 3.5.1 — Performans: tüm hesaplamalar < 5 ms
  *
- * Compatibility: C11, POSIX (Linux / macOS). Compiles on GCC and Clang.
- * Links with: comm_controller.c, port_mgmt.c (Module 3), timing_sync.c (Module 4)
+ * Uyumluluk: C11, POSIX (Linux / macOS). GCC ve Clang ile derlenir.
+ * Bağlantı: comm_controller.c, port_mgmt.c (Modül 3), timing_sync.c (Modül 4)
  */
 
 #ifndef COMMON_H
 #define COMMON_H
 
 /* =========================================================================
- * Standard includes — no platform-specific headers
+ * Standart kütüphaneler — platforma özgü başlık dosyası kullanılmaz
  * ========================================================================= */
-#include <stdint.h>   /* uint8_t, uint32_t                    */
-#include <stddef.h>   /* size_t                               */
-#include <arpa/inet.h>/* htonl(), ntohl() — POSIX / UNIX only */
+#include <stdint.h>   /* uint8_t, uint32_t                          */
+#include <stddef.h>   /* size_t                                      */
+#include <arpa/inet.h>/* htonl(), ntohl() — yalnızca POSIX / UNIX   */
 
 /* =========================================================================
- * Protocol constants
+ * Protokol sabitleri
  * ========================================================================= */
 
-/** Current protocol version encoded in every packet header. */
+/** Her paket başlığına yazılan güncel protokol sürümü. */
 #define PROTO_VERSION     ((uint8_t)1u)
 
-/** Maximum accepted payload size (bytes). Prevents buffer overflows. */
+/** Kabul edilen azami yük boyutu (bayt). Arabellek taşmalarını engeller. */
 #define MAX_PAYLOAD_LEN   4096u
 
-/** Total size of the wire header in bytes — must always equal 10. */
+/** Kablo üzerindeki başlığın bayt cinsinden toplam boyutu — her zaman 10 olmalıdır. */
 #define PKT_HEADER_SIZE   10u
 
 /* =========================================================================
- * Module 7 — Message Type Enum (SDD §4.7)
+ * Modül 7 — Mesaj Türü Numaralandırması (SDD §4.7)
  * ========================================================================= */
 
 /**
- * @brief Identifies the semantic purpose of a packet.
+ * @brief Paketin anlamsal amacını belirtir.
  *
- * Values are encoded as a single byte (uint8_t) in the header field
- * `msg_type`.  The integer assignments are fixed by the SDD and must not
- * be changed without a corresponding protocol-version bump.
+ * Değerler, başlık alanı `msg_type` içinde tek bayt (uint8_t) olarak kodlanır.
+ * Tamsayı atamaları SDD tarafından sabitlenmiştir; protokol sürümü
+ * yükseltilmeden değiştirilemez.
  */
 typedef enum {
-    MSG_AUTH  = 1, /**< Authentication handshake packet            */
-    MSG_DATA  = 2, /**< Application data / chat payload            */
-    MSG_ACK   = 3, /**< Acknowledgement for UDP reliability layer  */
-    MSG_ERROR = 4  /**< Error notification packet                  */
+    MSG_AUTH  = 1, /**< Kimlik doğrulama el sıkışma paketi              */
+    MSG_DATA  = 2, /**< Uygulama verisi / sohbet yükü                   */
+    MSG_ACK   = 3, /**< UDP güvenilirlik katmanı için onay paketi        */
+    MSG_ERROR = 4  /**< Hata bildirim paketi                             */
 } MsgType;
 
 /* =========================================================================
- * Module 7 — Packet Header Struct (SDD §4.7)
+ * Modül 7 — Paket Başlığı Yapısı (SDD §4.7)
  *
- * __attribute__((packed)) guarantees exactly 10 bytes with no compiler-
- * inserted padding.  Fields are stored in HOST byte order in memory;
- * callers must use pkt_hdr_to_network() before sending and
- * pkt_hdr_from_network() after receiving.
+ * __attribute__((packed)) derleyicinin yapıya dolgu eklemesini engelleyerek
+ * tam olarak 10 bayt garantisi sağlar. Alanlar bellekte HOST bayt sırasında
+ * tutulur; göndermeden önce pkt_hdr_to_network(), almadan sonra
+ * pkt_hdr_from_network() çağrılmalıdır.
  * ========================================================================= */
 
 /**
- * @brief 10-byte protocol header.  All multi-byte fields are in host byte
- * order while in memory; convert before placing on the wire.
+ * @brief 10 baytlık protokol başlığı. Çok baytlı tüm alanlar
+ * bellekte host bayt sırasındadır; kabloya yerleştirmeden önce dönüştürün.
  */
 typedef struct __attribute__((packed)) {
-    uint8_t  version;     /**< Protocol version — set to PROTO_VERSION  */
-    uint8_t  msg_type;    /**< One of MsgType enum values               */
-    uint32_t seq_num;     /**< Sequence number for UDP ordering/ACK     */
-    uint32_t payload_len; /**< Length of payload bytes following header */
+    uint8_t  version;     /**< Protokol sürümü — PROTO_VERSION olarak ayarlanır  */
+    uint8_t  msg_type;    /**< MsgType numaralandırma değerlerinden biri          */
+    uint32_t seq_num;     /**< UDP sıralama/ACK için sıra numarası                */
+    uint32_t payload_len; /**< Başlığı izleyen yük baytlarının uzunluğu           */
 } pkt_header_t;
 
-/* Compile-time assertion: header must be exactly 10 bytes. */
+/* Derleme zamanı doğrulaması: başlık tam olarak 10 bayt olmalıdır. */
 _Static_assert(sizeof(pkt_header_t) == PKT_HEADER_SIZE,
-               "pkt_header_t size must be exactly 10 bytes");
+               "pkt_header_t boyutu tam olarak 10 bayt olmalidir");
 
 /* =========================================================================
- * Byte-order conversion helpers
+ * Bayt sırası dönüşüm yardımcıları
  *
- * Call pkt_hdr_to_network() immediately before write()/send().
- * Call pkt_hdr_from_network() immediately after read()/recv().
- * Both functions operate in-place on a pointer to pkt_header_t.
+ * Kabloya göndermeden hemen önce pkt_hdr_to_network() çağrılmalıdır.
+ * read()/recv() sonrasında hemen pkt_hdr_from_network() çağrılmalıdır.
+ * Her iki fonksiyon da pkt_header_t işaretçisi üzerinde yerinde çalışır.
  * ========================================================================= */
 
 /**
- * @brief Convert header multi-byte fields from host to network (big-endian)
- *        byte order before placing on the wire.
+ * @brief Kabloya koymadan önce başlığın çok baytlı alanlarını host'tan
+ *        ağ (big-endian) bayt sırasına dönüştürür.
  *
- * @param hdr  Pointer to the header to convert (modified in-place).
+ * @param hdr  Dönüştürülecek başlığın işaretçisi (yerinde değiştirilir).
  */
 static inline void pkt_hdr_to_network(pkt_header_t *hdr)
 {
@@ -108,10 +108,10 @@ static inline void pkt_hdr_to_network(pkt_header_t *hdr)
 }
 
 /**
- * @brief Convert header multi-byte fields from network (big-endian) to host
- *        byte order after reading from the wire.
+ * @brief Kablodan okuduktan sonra başlığın çok baytlı alanlarını ağ
+ *        (big-endian) bayt sırasından host bayt sırasına dönüştürür.
  *
- * @param hdr  Pointer to the header to convert (modified in-place).
+ * @param hdr  Dönüştürülecek başlığın işaretçisi (yerinde değiştirilir).
  */
 static inline void pkt_hdr_from_network(pkt_header_t *hdr)
 {
@@ -120,12 +120,12 @@ static inline void pkt_hdr_from_network(pkt_header_t *hdr)
 }
 
 /**
- * @brief Initialise a header with sensible defaults.
+ * @brief Başlığı makul varsayılan değerlerle başlatır.
  *
- * Sets version = PROTO_VERSION. Caller fills msg_type, seq_num,
- * and payload_len before sending.
+ * version = PROTO_VERSION olarak ayarlar. Çağıran, göndermeden önce
+ * msg_type, seq_num ve payload_len alanlarını doldurur.
  *
- * @param hdr  Header to initialise.
+ * @param hdr  Başlatılacak başlık.
  */
 static inline void pkt_hdr_init(pkt_header_t *hdr)
 {
@@ -136,10 +136,10 @@ static inline void pkt_hdr_init(pkt_header_t *hdr)
 }
 
 /* =========================================================================
- * Utility macros
+ * Yardımcı makrolar
  * ========================================================================= */
 
-/** Check whether a MsgType value is within the valid range. */
+/** Bir MsgType değerinin geçerli aralıkta olup olmadığını denetler. */
 #define MSG_TYPE_VALID(t) ((t) >= MSG_AUTH && (t) <= MSG_ERROR)
 
 #endif /* COMMON_H */
