@@ -1,53 +1,55 @@
 # P2P Dynamic Port Switching System 🛡️
 **A Moving Target Defense (MTD) Prototype for Secure P2P Communication**
 
-[cite_start]Bu proje, **Çankaya Üniversitesi Yazılım Mühendisliği Bölümü** [cite: 1, 377] [cite_start]SENG 491-492 Graduation Project [cite: 4, 380] kapsamında geliştirilen bir siber güvenlik prototipidir. [cite_start]Temel amacı, iki peer arasındaki iletişimi dinamik ve periyodik port değişimleri (port-hopping) ile koruyarak saldırganların hedef servisi tespit etmesini engellemek ve bir "Moving Target Defense" (MTD) mekanizması sunmaktır[cite: 22, 29].
+Bu proje, **Çankaya Üniversitesi Yazılım Mühendisliği Bölümü** SENG 491-492 Graduation Project kapsamında geliştirilen bir siber güvenlik prototipidir. Sistemin temel amacı, iki cihaz (peer) arasındaki iletişimi periyodik ve senkronize port değişimleri (port-hopping) ile maskeleyerek saldırganlar için "hareketli bir hedef" (Moving Target Defense) oluşturmaktır.
 
 ---
 
 ## 🎯 Projenin Amacı (Purpose)
-Sistem, iletişim kanallarını sürekli değiştirerek saldırganlar için "hareketli bir hedef" haline gelir. Temel savunma hedefleri şunlardır:
-* [cite_start]**Port Tarama ve Keşif Saldırılarını Önleme:** Portlar periyodik olarak değiştiği için tarama sonuçları hızla geçersiz kalır[cite: 65, 66].
-* [cite_start]**Servis Fingerprinting Koruması:** Saldırganın derin paket incelemesi yapabileceği stabil bir bağlantı kurmasını engeller[cite: 69].
-* [cite_start]**DoS Koruması:** Sabit portlara yönelik uygulama katmanı DoS saldırılarını etkisiz hale getirir[cite: 74].
-* [cite_start]**Merkeziyetsiz Senkronizasyon:** İki peer, merkezi bir sunucu olmadan deterministik bir algoritma ile senkronize olur[cite: 31, 399].
+Sistem, iletişim kanallarını sürekli değiştirerek saldırganların hedef servisi bulmasını, analiz etmesini veya kesintiye uğratmasını zorlaştırır. Temel savunma hedefleri:
+* **Keşif Saldırılarını Önleme:** Nmap veya Masscan gibi araçlarla yapılan port tarama sonuçlarını anında geçersiz kılar.
+* **Fingerprinting Koruması:** Saldırganın servis versiyonu veya protokol detaylarını belirlemesine yetecek kadar uzun süre aynı portta kalmaz.
+* **DoS Koruması:** Sabit bir portu hedef alan sel (flooding) saldırılarını, servis o portu terk ettiği için etkisiz hale getirir.
+* **Merkeziyetsiz Senkronizasyon:** İki peer, ortak bir gizli anahtar üzerinden merkezi bir sunucuya ihtiyaç duymadan senkronize olur.
 
 
 
 ---
 
 ## 🛠️ Teknik Özellikler (Technical Specs)
-* [cite_start]**Dil & Standart:** Düşük seviyeli ağ kontrolü ve performans için **C dili** ve **POSIX Socket API** kullanılmıştır[cite: 323, 397].
-* [cite_start]**Desteklenen Platformlar:** Linux ve macOS (Unix-tabanlı sistemler)[cite: 43, 460].
-* [cite_start]**Protokol:** TCP ve UDP desteği [cite: 171, 401][cite_start]; ağ gecikmesi (>200ms) veya paket kaybına (>5%) göre otomatik protokol geçişi[cite: 564, 688].
-* [cite_start]**Header Yapısı:** Tüm iletişim, dökümanda belirtilen özel **10-byte** header yapısı ile gerçekleştirilir[cite: 664].
-* [cite_start]**Performans Hedefi:** Port hesaplama ve kimlik doğrulama işlemleri **5ms** altında tamamlanmalıdır[cite: 336, 337].
+* **Dil:** Düşük seviyeli ağ kontrolü ve performans için **C dili**.
+* **Standart:** POSIX Socket API (Linux ve macOS uyumlu).
+* **Adaptif Protokol:** Ağ gecikmesi (>200ms) veya paket kaybına (>5%) göre TCP ve UDP arasında dinamik geçiş.
+* **Özel Paket Formatı:** 10-byte boyutunda optimize edilmiş özel bir header yapısı.
+* **Performans:** Kritik hesaplama ve el sıkışma süreçleri için 5ms altı işlem süresi hedefi.
 
 
 
 ---
 
 ## 🏗️ Modüler Mimari (Project Architecture)
-[cite_start]Sistem, SDD dökümanında tanımlanan ana modüllerden oluşmaktadır[cite: 391]:
-1. [cite_start]**Communication Controller (Module 1):** Socket yaşam döngüsü ve protokol yönetimi[cite: 601, 602].
-2. [cite_start]**Protocol Decision Logic (Module 2):** Adaptif geçiş mekanizması[cite: 612, 613].
-3. [cite_start]**Port Management (Module 3):** Deterministik port hesaplama[cite: 626, 627].
-4. [cite_start]**Timing & Sync Handler (Module 4):** NTP tabanlı zaman adımı yönetimi[cite: 635, 637].
-5. [cite_start]**Role Assignment (Module 5):** Listener/Dialer rollerinin dağılımı[cite: 648, 649].
-6. [cite_start]**Logging Component (Module 6):** Hibrit günlükleme (Console/File)[cite: 654, 656].
-7. [cite_start]**Message/Packet Format (Module 7):** Özel header ve serileştirme[cite: 662, 663].
+Proje, dökümanlarda (SDD) tanımlanan 7 ana modül üzerine kuruludur:
+1. **Communication Controller (Module 1):** Socket yaşam döngüsü ve protokol yönetimi.
+2. **Protocol Decision Logic (Module 2):** Adaptif geçiş mekanizması.
+3. **Port Management (Module 3):** Deterministik port hesaplama.
+4. **Timing & Sync Handler (Module 4):** NTP tabanlı zaman adımı yönetimi.
+5. **Role Assignment (Module 5):** Listener/Dialer rollerinin dağılımı.
+6. **Logging Component (Module 6):** Hibrit günlükleme (Console/File).
+7. **Message/Packet Format (Module 7):** Özel header ve serileştirme.
+
+
 
 ---
 
-## 🚀 Başlatma (Usage)
-[cite_start]Sistem, CLI üzerinden konfigüre edilebilir parametrelerle başlatılır[cite: 227].
+## 🚀 Kullanım (Usage)
+Proje bir `Makefile` kullanılarak derlenir ve CLI parametreleri ile çalıştırılır.
 
 ```bash
 # Projeyi derleyin
 make
 
-# Peer 0 (Örn: ID 0) olarak başlatın
-./dps_system --secretKey "key" --peer-id 0 --interval 30 --port-range 20000-30000 [cite: 228, 480]
+# Peer 0 (Listener/Dialer rolleri otomatik belirlenir)
+./dps_system --secretKey "shared_secret" --peer-id 0 --interval 30 --port-range 20000-30000
 
-# Peer 1 (Örn: ID 1) olarak başlatın
-./dps_system --secretKey "key" --peer-id 1 --interval 30 --port-range 20000-30000 [cite: 228, 480]
+# Peer 1
+./dps_system --secretKey "shared_secret" --peer-id 1 --interval 30 --port-range 20000-30000
