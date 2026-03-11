@@ -1,7 +1,7 @@
 # P2P Dynamic Port Switching System 🛡️
 **A Moving Target Defense (MTD) Prototype for Secure P2P Communication**
 
-[cite_start]Bu proje, **Çankaya Üniversitesi Yazılım Mühendisliği Bölümü** SENG 491-492 Graduation Project kapsamında geliştirilen bir siber güvenlik prototipidir[cite: 1, 4, 380]. [cite_start]Temel amacı, iki peer arasındaki iletişimi dinamik ve periyodik port değişimleri (port-hopping) ile koruyarak saldırganların hedef servisi tespit etmesini engellemek ve bir "Moving Target Defense" (MTD) mekanizması sunmaktır[cite: 22, 26, 61, 407].
+[cite_start] Bu proje, **Çankaya Üniversitesi Yazılım Mühendisliği Bölümü** SENG 491-492 Graduation Project kapsamında geliştirilen bir siber güvenlik prototipidir[cite: 1, 4, 380]. [cite_start]Temel amacı, iki peer arasındaki iletişimi dinamik ve periyodik port değişimleri (port-hopping) ile koruyarak saldırganların hedef servisi tespit etmesini engellemek ve bir "Moving Target Defense" (MTD) mekanizması sunmaktır[cite: 22, 26, 61, 407].
 
 ---
 
