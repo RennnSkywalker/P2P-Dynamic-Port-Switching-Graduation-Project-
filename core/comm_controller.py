@@ -131,16 +131,22 @@ class CommController:
                             time.sleep(0.5)
             else:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.settimeout(0.2)
-                if role == "LISTENER":
-                    try:
-                        sock.bind(('0.0.0.0', target_port))
-                    except Exception:
-                        pass
+                
+                # Dinleyici target_port'u alırken, Arayıcı target_port + 1'i alır. 
+                # Böylelikle Localhost testlerinde bile (aynı ip) asimetrik çift yönlü UDP sağlanır.
+                my_udp_port = target_port if role == "LISTENER" else target_port + 1
+                peer_udp_port = target_port + 1 if role == "LISTENER" else target_port
+                
+                try:
+                    sock.bind(('0.0.0.0', my_udp_port))
+                except Exception as e:
+                    self.logger.warning(f"UDP Bind Error: {e}")
                 
                 self.active_socket = sock
                 self.last_connected = True
-                self.udp_target = (self.target_ip, target_port)
+                self.udp_target = (self.target_ip, peer_udp_port)
 
     def _handle_io(self):
         role = get_role_for_peer(self.bootstrap_params, self.current_step, self.peer_id)
