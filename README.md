@@ -2,9 +2,11 @@
 
 Bu proje, C yerine Python tabanlı yeniden yapılandırılarak *SENG 491 - 492 Bitirme Projesi (SDD)* standartlarına uygun olacak şekilde geliştirilmiştir. Proje, iki makinenin belirli aralıklarla (time-step) port değiştirip, ağ kararlılığına göre TCP/UDP arası dinamik geçiş yapmasını (Automatic Protocol Decision) konu alır. Ek olarak RSA şifrelemesi kullanarak asimetrik kilitlerini (Asymmetric Bootstrap) otomatik olarak paylaşırlar.
 
+Ayrıca sisteme gömülü **Canlı Web Arayüzü (Web UI)** sayesinde, terminalden çalışan bu P2P ağ yapısını modern bir tarayıcı penceresinden saniyesi saniyesine izleyebilirsiniz!
+
 ## Gereksinimler ve Kurulum
 
-Sistemin düzgün çalışabilmesi için **sadece 1 adet** dış kütüphane gerekmektedir. Python'un varsayılan kütüphaneleri dışındaki tek ihtiyacımız `cryptography` modülüdür.
+Sistemin düzgün çalışabilmesi için **sadece 1 adet** dış kütüphane gerekmektedir. Python'un varsayılan kütüphaneleri dışındaki tek ihtiyacımız `cryptography` modülüdür. Web sunucusu Python'un kendi standart kütüphaneleriyle (stdlib) yazılmıştır, ekstra bir web framework gerektirmez.
 
 ### Windows Kullanıcıları İçin
 Terminalde (CMD veya PowerShell) direkt olarak proje dizinindeyken şu komutu yazarak kütüphaneyi kurabilirsiniz:
@@ -18,48 +20,53 @@ Yeni işletim sistemlerinde PEP-668 sistem korumasına takılmamak adına, Pytho
 sudo apt update
 sudo apt install python3-cryptography
 ```
-Eğer `apt` ile yüklemek istemezseniz ya da hata alırsanız, varsayılan kurulum engellerini aşmak adına pip'ten zorunlu yetki isteyebilirsiniz:
-```bash
-pip3 install cryptography --break-system-packages
-```
 
-## Projeyi İki Ayrı Cihazda Çalıştırma
+## Projeyi Çalıştırma ve Web Arayüzüne Bağlanma
 
-Kodları iki ayrı cihazda karşılıklı olarak, hiçbir simülasyona yer bırakmadan, saf İnternet Protokolleri (IP) bazında konuşturmak için aşağıdaki adımları uygulayın. *(ÖNEMLİ: Eğer projenin ana klasöründe `keys` adında bir klasör oluşmuşsa, temiz bir başlangıç için onu sildiğinizden emin olun).*
+Aşağıdaki adımları uygulayarak sistemi başlatabilirsiniz. Komutları girdiğiniz an sistem çalışmaya başlar ve **otomatik olarak tarayıcınızda (Örn: Chrome) `http://localhost:8080` adresinde harika bir Web UI sekmesi açar**.
 
 Varsayım olarak cihazlarımız şunlardır:
-* **Bilgisayar A (Sizin Bilgisayarınız):** Yerel Ağ İp adresi `192.168.1.10`
-* **Bilgisayar B (Karşı Bilgisayar):** Yerel Ağ İp adresi `192.168.1.20`
+* **Bilgisayar A (Ubuntu - Dinleyici):** Yerel Ağ İp adresi `192.168.1.22`
+* **Bilgisayar B (Kali - Arayıcı):** Yerel Ağ İp adresi `192.168.1.21`
 
 ### 1. Adım: Cihaz A (Node 0 - Dinleyici Lideri)
-Proje klasörüne terminalden girin ve **hedef (target) IP olarak Cihaz B'nin adresini** belirterek ana programı başlatın:
+Ubuntu terminalinden girin ve **hedef (target) IP olarak Cihaz B'nin (Kali) adresini** belirterek ana programı başlatın:
 ```bash
-python main.py --peer-id 0 --target-ip 192.168.1.20
+python main.py --peer-id 0 --target-ip 192.168.1.21
 ```
 
 ### 2. Adım: Cihaz B (Node 1 - Arayıcı)
-Aynı şekilde diğer bilgisayardan terminale girin ve hedef IP olarak bu sefer **Cihaz A'nın adresini** belirterek bağlayın:
+Kali terminalinden girin ve hedef IP olarak bu sefer **Cihaz A'nın (Ubuntu) adresini** belirterek bağlayın:
 ```bash
-python main.py --peer-id 1 --target-ip 192.168.1.10
+python main.py --peer-id 1 --target-ip 192.168.1.22
 ```
 
-### 3. Adım: Otomatik Bağlantı (Asymmetric Handshake)
-Sistem çalıştırıldığı an önce bir `keys` klasörü üretir ve kendi gizli/açık RSA anahtarlarını inşa eder. 
-Hemen ardından kısa bir saniyeliğine iki bilgisayar birbirlerine TCP `5000` nolu keşif (discovery) portundan ulaşıp, *Açık Anahtarlarını (Public Keys)* fırlatırlar. 
-Ardından portu yok edip rastgele ürettikleri diğer güvenli (Örn: `16426`) porta zıplar ve Asimetrik Şifreleme algoritmalarını kurup P2P güvenliğini tescillerler!
+Sistem çalıştırıldığı an terminalin arkasında bir Web UI sunucusu ayağa kalkar. Ekranınızda tarayıcı fırlayacak ve `http://localhost:8080` üzerinden P2P zıplamalarını canlı izleyebileceksiniz.
 
-Ekranda `Chat Interface Started. Ready for Input.` bildirimini gördükten sonra rahatça mesajlaşabilirsiniz. Ağ gecikmelerini hesaplayan sistem 12 saniyede bir otomatik zıplama yapacaktır.
+## Gelişmiş Başlatma Parametreleri (Tüm Seçenekler)
+
+Proje sadece `--peer-id` ve `--target-ip` ile sınırlı değildir. Jüri sunumunda sistemi farklı şekillerde test etmek isterseniz şu parametreleri kullanabilirsiniz:
+
+| Parametre | Ne İşe Yarar? | Varsayılan Değer | Örnek Kullanım |
+|---|---|---|---|
+| `--peer-id` | Cihazın kimliği (0 Dinleyici, 1 Arayıcı). Zorunludur. | - | `--peer-id 1` |
+| `--target-ip` | Karşı bilgisayarın IP adresi. | `127.0.0.1` | `--target-ip 192.168.1.22` |
+| `--mode` | Ağ protokolünü zorlar (`AUTO`, `TCP`, `UDP`). | `AUTO` | `--mode UDP` |
+| `--interval` | Sistem kaç saniyede bir port değiştirecek? | `10` | `--interval 5` |
+| `--min-port` | Zıplanacak portların alt sınırı. | `20000` | `--min-port 40000` |
+| `--max-port` | Zıplanacak portların üst sınırı. | `30000` | `--max-port 50000` |
+| `--web-port` | Tarayıcıda açılacak Web UI'ın kendi portu. | `8080` | `--web-port 8081` |
+
+**Not:** Bu kuralları sadece Arayıcı'nın (`--peer-id 1`) girmesi yeterlidir. Arayıcı bunları Asimetrik Bootstrap sırasında Dinleyiciye şifreleyerek iletir, Dinleyici kurallara otomatik uyar.
 
 ## İsteğe Bağlı: Tek Cihazda Test Modu (Test Launcher)
-Geliştirme esnasında kurulumlarla ve 2 cihazın terminal IP işleriyle uğraşmak istemediğiniz anlarda, sadece sistemin çalışırlığını denemek için **`test_launcher.py`** isimli dosyayı kullanabilirsiniz. İşletim sisteminizin türünü algılar ve iki farklı konsol penceresini Localhost (`127.0.0.1`) üzerinden saniyesinde yan yana bağlar.
-
+Geliştirme esnasında kurulumlarla uğraşmak istemediğiniz anlarda **`test_launcher.py`** isimli dosyayı kullanabilirsiniz. Bu araç tek bilgisayarda yan yana iki terminal açar. Portlar çakışmasın diye birinin arayüzünü `http://localhost:8080`, diğerini `http://localhost:8081` adresinden başlatır.
 ```bash
 python test_launcher.py
 ```
 
 ## Ağ İzleme Denetimi (Wireshark P2P Tracker)
-Uygulamanızı bitirme jürisine veya arkadaşlarınıza *verilerin gerçekten durmadan atlayarak farklı portlardan yönlendirildiğini (Moving Target Defense)* kanıtlamak isterseniz, sohbetlerinizi bitirdikten (veya testteyken) sonra yazdığımız **Wireshark Tracker** destek aracını kullanabilirsiniz:
+Arka planda dönen port trafiğini Wireshark üzerinden kanıtlamak isterseniz, `session.log` dosyasını tarayarak Wireshark'a özel P2P filtresi oluşturan aracımızı çalıştırabilirsiniz:
 ```bash
 python wireshark_tracker.py
 ```
-Bu araç projeniz tarafından üretilen saf logları tarayarak, yalnızca ve yalnızca kullandığınız o spesifik kripto portlarını ayıklar ve yerel olarak bir *Wireshark Display Filter* cümlesi inşa ederek analiz pencerenizi başlatır.

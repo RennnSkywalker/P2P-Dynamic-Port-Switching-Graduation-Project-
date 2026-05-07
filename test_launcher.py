@@ -5,10 +5,10 @@ import shutil
 import sys
 import platform
 
-def launch_instance(peer_id, interval):
+def launch_instance(peer_id, interval, web_port):
     interpreter = sys.executable
     script = "main.py"
-    args = ["--peer-id", str(peer_id), "--interval", str(interval), "--mode", "AUTO"]
+    args = ["--peer-id", str(peer_id), "--interval", str(interval), "--mode", "AUTO", "--web-port", str(web_port)]
     system = platform.system()
     
     if system == "Windows":
@@ -51,12 +51,16 @@ def main():
     os.makedirs("keys", exist_ok=True)
 
     print("\n[+] Yeni konsolda Node 0 (Dinleyici rolü) başlatılıyor...")
-    launch_instance(0, 12)
+    launch_instance(0, 12, 8080)
 
     time.sleep(1) # Kısa bir mola
 
     print("[+] Yeni konsolda Node 1 (Arayıcı rolü) başlatılıyor...")
-    launch_instance(1, 12)
+    launch_instance(1, 12, 8081)
+
+    print("\n[!] Tüm süreçler başarıyla tetiklendi.")
+    print("  Node 0 Web UI: http://localhost:8080")
+    print("  Node 1 Web UI: http://localhost:8081")
 
     print("\n[!] Tüm süreçler başarıyla tetiklendi. Lütfen açılan iki yeni pencereyi kontrol edin.")
     print("Sistemler 2-Aşamalı Başlangıcı yapacak ve her 12 saniyede bir portlarını değiştirecektir.")

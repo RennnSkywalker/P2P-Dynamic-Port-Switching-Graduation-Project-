@@ -7,6 +7,7 @@ from core.crypto_utils import CryptoManager
 from core.logger import setup_logger
 from core.bootstrap import BootstrapManager
 from core.comm_controller import CommController
+from web_server import start_web_server
 
 def setup_args():
     parser = argparse.ArgumentParser(description="P2P Dynamic Port Switching CLI")
@@ -16,6 +17,7 @@ def setup_args():
     parser.add_argument("--interval", type=int, default=10)
     parser.add_argument("--min-port", type=int, default=20000)
     parser.add_argument("--max-port", type=int, default=30000)
+    parser.add_argument("--web-port", type=int, default=8080, help="Web UI sunucu portu")
     return parser.parse_args()
 
 def main():
@@ -64,6 +66,18 @@ def main():
     # Çekirdek uygulama mantığını başlat
     comm = CommController(args.target_ip, args.peer_id, bootstrap_params, logger, mode=args.mode)
     comm.start()
+
+    # Web UI sunucusunu başlat
+    try:
+        start_web_server(comm, args.peer_id, bootstrap_params, port=args.web_port)
+        url = f"http://localhost:{args.web_port}"
+        logger.info(f"Web UI started at {url}")
+        
+        # Tarayıcıyı otomatik aç
+        import webbrowser
+        webbrowser.open(url)
+    except Exception as e:
+        logger.warning(f"Web UI could not start: {e}")
 
     def print_messages():
         while True:

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTD Secure — P2P Dynamic Port Switching</title>
+  <meta name="description" content="Secure P2P communication with dynamic port switching and MTD protocol.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=5">
+</head>
+
+<body data-theme="adv-dark" data-mode="advanced">
+
+  <!-- APP SHELL -->
+  <div class="app-shell" id="appShell">
+
+    <!-- Connection Lost Banner -->
+    <div class="conn-banner" id="connBanner">
+      ⚠ Connection Lost — Retrying on new port...
+      <button onclick="reconnect()"
+        style="margin-left:auto;background:rgba(255,255,255,0.2);border:none;color:#fff;padding:3px 10px;border-radius:4px;cursor:pointer;font-size:10px;">Reconnect</button>
+    </div>
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="logo">
+        <div class="logo-icon" id="logoIcon">MT</div>
+        <div>
+          <span class="logo-name">MTD Secure</span>
+          <span class="logo-tag">P2P / Dynamic Port Switching</span>
+        </div>
+      </div>
+
+      <!-- Advanced: status chips -->
+      <div class="status-chips adv-only" id="statusChips">
+        <div class="chip">
+          <div class="dot dot-green" id="statusDot"></div>
+          <span id="statusText">Connected</span>
+        </div>
+        <div class="port-chip" id="portDisplay">Port: 8745</div>
+        <div class="chip">Latency: <span id="latVal" style="color:var(--green);margin-left:3px;">42ms</span></div>
+        <div class="chip">TCP&nbsp;/&nbsp;UDP</div>
+        <div class="chip">NTP Synced</div>
+      </div>
+
+      <!-- Simple: peer info -->
+      <div class="uf-peer uf-only">
+        <div class="uf-avatar" id="ufAvatar">P</div>
+        <div>
+          <div class="uf-peer-name">Peer</div>
+          <div class="uf-online">
+            <div class="dot" style="width:6px;height:6px;background:var(--green);border-radius:50%;"></div>
+            Online
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT CONTROLS — always visible, always right-aligned -->
+      <div class="topbar-right">
+        <div class="toggle-group">
+          <button class="tog-btn active" id="topAdvBtn" onclick="setMode('advanced')">Advanced</button>
+          <button class="tog-btn" id="topSimBtn" onclick="setMode('simple')">Simple</button>
+        </div>
+        <div class="toggle-group">
+          <button class="tog-btn active" id="topDarkBtn" onclick="setThemeVariant('dark')">Dark</button>
+          <button class="tog-btn" id="topLightBtn" onclick="setThemeVariant('light')">Light</button>
+        </div>
+        <button class="icon-btn-top" title="Connection lost" onclick="toggleConnLost()">⚡</button>
+        <button class="icon-btn-top" onclick="openSettings()">⚙</button>
+      </div>
+    </div>
+
+    <!-- MAIN LAYOUT -->
+    <div class="main-layout">
+
+      <!-- LEFT SIDEBAR — ADVANCED ONLY -->
+      <div class="sidebar-left adv-only" style="flex-direction:column;">
+        <div class="sidebar-header">
+          <span class="sidebar-title">Port Activity</span>
+          <button class="clear-btn" onclick="clearLogs()">Clear</button>
+        </div>
+        <div class="log-scroll" id="logContainer"></div>
+        <div style="padding:8px 12px;border-top:0.5px solid var(--border);">
+          <button onclick="exportLogs()"
+            style="width:100%;font-size:9px;padding:5px;border-radius:5px;background:var(--surface2);border:0.5px solid var(--border2);color:var(--text3);cursor:pointer;font-family:var(--mono-font);">Export
+            Logs ↓</button>
+        </div>
+      </div>
+
+      <!-- CHAT AREA -->
+      <div class="chat-area">
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="input-bar">
+          <button class="icon-action" title="Attach">📎</button>
+          <input class="chat-input" id="msgInput" placeholder="Type a message…"
+            onkeydown="if(event.key==='Enter')sendMessage()">
+          <button class="icon-action adv-only" title="Clear logs" onclick="clearLogs()"
+            style="font-size:11px;font-family:var(--mono-font);">CLR</button>
+          <button class="send-btn" onclick="sendMessage()">
+            <svg class="send-icon" viewBox="0 0 24 24">
+              <path d="M2 21l21-9L2 3v7l15 2-15 2z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- RIGHT SIDEBAR — ADVANCED ONLY -->
+      <div class="sidebar-right adv-only" style="flex-direction:column;">
+        <div class="sidebar-title" style="padding:2px 0 6px;">Metrics</div>
+
+        <div class="metric-card">
+          <div class="metric-label">Messages</div>
+          <div class="metric-val green" id="mcMsgs">14</div>
+          <div class="metric-sub">sent + received</div>
+          <div class="meter-bar">
+            <div class="meter-fill green" id="mMsgs" style="width:60%;"></div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Port Switches</div>
+          <div class="metric-val accent" id="mcPorts">7</div>
+          <div class="metric-sub">this session</div>
+          <div class="meter-bar">
+            <div class="meter-fill" id="mPorts" style="width:35%;"></div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Data Transferred</div>
+          <div class="metric-val amber" id="mcData">2.3 MB</div>
+          <div class="metric-sub">total</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Avg Latency</div>
+          <div class="metric-val cyan" id="mcLat">38ms</div>
+          <div class="metric-sub">rolling avg</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Packet Loss</div>
+          <div class="metric-val green" id="mcLoss">0.1%</div>
+          <div class="metric-sub">acceptable</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Uptime</div>
+          <div class="metric-val" id="mcUptime">00:14:32</div>
+          <div class="metric-sub">session</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Protocol Switches</div>
+          <div class="metric-val accent" id="mcProto">3</div>
+          <div class="metric-sub">TCP ↔ UDP</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  </div>
+
+  <!-- PORT SWITCH TOAST -->
+  <div class="toast" id="toast">
+    <div style="width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;"></div>
+    <span id="toastMsg">Port switched: 8745 → 9102</span>
+  </div>
+
+  <!-- ============================================================
+     SETTINGS PANEL
+     ============================================================ -->
+  <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this)closeSettings()">
+    <div class="settings-panel">
+      <div class="settings-title">
+        Settings
+        <button class="close-btn" onclick="closeSettings()">✕</button>
+      </div>
+
+      <div class="settings-row">
+        <span class="settings-key">Port Switch Interval</span>
+        <span class="settings-val">10s (varsayılan)</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">Deterministic Algorithm</span>
+        <span class="settings-val">SHA-256</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">NTP Sync</span>
+        <button class="toggle-switch" id="ntpToggle" onclick="this.classList.toggle('off')"></button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">Auto-reconnect</span>
+        <button class="toggle-switch" onclick="this.classList.toggle('off')"></button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">Bootstrap Encryption</span>
+        <span class="settings-val">RSA-2048 (OAEP)</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">Port Range</span>
+        <span class="settings-val">20000 – 30000</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">Show packet info</span>
+        <button class="toggle-switch" onclick="this.classList.toggle('off')"></button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-key">Export format</span>
+        <span class="settings-val">JSON / CSV</span>
+      </div>
+
+      <div style="margin-top:16px;display:flex;gap:8px;">
+        <button onclick="closeSettings()"
+          style="flex:1;padding:9px;border-radius:8px;background:var(--accent);border:none;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:500;">Save</button>
+        <button onclick="closeSettings()"
+          style="flex:1;padding:9px;border-radius:8px;background:var(--surface2);border:0.5px solid var(--border2);color:var(--text2);cursor:pointer;font-family:'DM Sans',sans-serif;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js?v=5"></script>
+</body>
+
+</html>

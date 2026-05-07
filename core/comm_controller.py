@@ -30,6 +30,16 @@ class CommController:
         self.active_protocol = "TCP"
         self.last_connected = False
         
+        # UI durum takibi için ek alanlar
+        self.all_messages = []       # Tüm gelen/giden mesaj geçmişi
+        self.port_switch_log = []    # Port zıplama kayıtları
+        self.port_switch_count = 0
+        self.proto_switch_count = 0
+        self.prev_protocol = None
+        self.current_port = 0
+        self.current_role = ""
+        self.start_time = time.time()
+        
     def start(self):
         self.logger.info("Starting Communication Controller...")
         self.running = True
@@ -51,6 +61,12 @@ class CommController:
                 "text": text,
                 "ts": time.time(),
                 "type": "DATA"
+            })
+            self.all_messages.append({
+                "dir": "out", "text": text,
+                "time": time.strftime("%H:%M:%S"),
+                "port": self.current_port,
+                "proto": self.active_protocol
             })
 
     def fetch_messages(self):
@@ -83,9 +99,28 @@ class CommController:
                     pass
                 self.active_socket = None
 
+            old_port = self.current_port
+            old_proto = self.active_protocol
+            
             self.active_protocol = self.decision_logic.determine_protocol(self.bootstrap_params, step, self.mode)
             target_port = get_target_port(self.bootstrap_params, step)
             role = get_role_for_peer(self.bootstrap_params, step, self.peer_id)
+            
+            self.current_port = target_port
+            self.current_role = role
+            self.port_switch_count += 1
+            if self.prev_protocol is not None and self.prev_protocol != self.active_protocol:
+                self.proto_switch_count += 1
+            self.prev_protocol = self.active_protocol
+            
+            self.port_switch_log.append({
+                "time": time.strftime("%H:%M:%S"),
+                "from": old_port, "to": target_port,
+                "proto": self.active_protocol,
+                "type": "green"
+            })
+            if len(self.port_switch_log) > 30:
+                self.port_switch_log.pop(0)
             
             self.logger.info(f"Interval Reached. Step: {step} | Role: {role} | Proto: {self.active_protocol} | Target Port: {target_port}")
             
@@ -193,6 +228,12 @@ class CommController:
             if msg_type == "DATA":
                 with self.lock:
                     self.incoming_queue.append(msg)
+                    self.all_messages.append({
+                        "dir": "in", "text": msg.get("text", ""),
+                        "time": time.strftime("%H:%M:%S"),
+                        "port": self.current_port,
+                        "proto": self.active_protocol
+                    })
                 
                 # Paket onayı (ACK) gönder
                 ack = {"type": "ACK", "ts": msg.get("ts", 0)}
@@ -210,3 +251,26 @@ class CommController:
                 self.decision_logic.record_packet(rtt=rtt, lost=False)
         except Exception:
             pass
+
+    def get_state(self):
+        """UI için güncel sistem durumunu döner."""
+        with self.lock:
+            avg_lat = 0
+            if self.decision_logic.rtt_history:
+                avg_lat = sum(self.decision_logic.rtt_history) / len(self.decision_logic.rtt_history)
+            loss_rate = 0
+            if self.decision_logic.total_count > 0:
+                loss_rate = self.decision_logic.loss_count / self.decision_logic.total_count
+            return {
+                "connected": self.last_connected,
+                "current_port": self.current_port,
+                "protocol": self.active_protocol,
+                "role": self.current_role,
+                "step": self.current_step,
+                "latency_ms": round(avg_lat * 1000, 1),
+                "loss_rate": round(loss_rate * 100, 2),
+                "port_switches": self.port_switch_count,
+                "proto_switches": self.proto_switch_count,
+                "msg_count": len(self.all_messages),
+                "uptime": int(time.time() - self.start_time)
+            }
