@@ -18,6 +18,9 @@ def setup_args():
     parser.add_argument("--min-port", type=int, default=20000)
     parser.add_argument("--max-port", type=int, default=30000)
     parser.add_argument("--web-port", type=int, default=8080, help="Web UI sunucu portu")
+    parser.add_argument("--discovery-port", type=int, default=55000,
+                        help="Out-of-band bootstrap keşif portu (varsayılan: 55000). "
+                             "macOS 12+ sistemlerde port 5000 AirPlay tarafından kullanılır.")
     return parser.parse_args()
 
 def main():
@@ -41,7 +44,8 @@ def main():
     logger.info("Initiating automatic Out-of-band Public Key Exchange via Discovery Port...")
 
     is_dialer = (args.peer_id == 1)
-    bm = BootstrapManager(args.target_ip, args.peer_id, priv_key_path, pub_key_path, peer_pub_key_path)
+    bm = BootstrapManager(args.target_ip, args.peer_id, priv_key_path, pub_key_path, peer_pub_key_path,
+                          discovery_port=args.discovery_port)
     
     bootstrap_params = None
     if is_dialer:

@@ -9,7 +9,7 @@ from .crypto_utils import CryptoManager
 logger = logging.getLogger("SystemLog")
 
 class BootstrapManager:
-    def __init__(self, target_ip, peer_id, priv_key_path, pub_key_path, peer_pub_key_path):
+    def __init__(self, target_ip, peer_id, priv_key_path, pub_key_path, peer_pub_key_path, discovery_port=55000):
         self.target_ip = target_ip
         # Bu başlangıç bağlamında 0=Dinleyici (Listener), 1=Arayıcı (Dialer) olarak atanır
         # Bizim bağlamımızda, Node 0 Başlangıç aşamasında Dinleyici, Node 1 Arayıcı rolündedir
@@ -24,8 +24,10 @@ class BootstrapManager:
             self.peer_public_key = self.crypto.load_public_key(peer_pub_key_path)
         else:
             self.peer_public_key = None
-            
-        self.discovery_port = 5000
+
+        # macOS 12+ varsayılan olarak port 5000'i AirPlay Receiver için kullanır.
+        # Bu nedenle varsayılan keşif portu 55000 olarak ayarlandı.
+        self.discovery_port = discovery_port
 
     def run_stage1_listener(self) -> int:
         """Aşama 1: Basit klasik soket. Arayıcıdan dinamik başlangıç portunu teslim alır."""
