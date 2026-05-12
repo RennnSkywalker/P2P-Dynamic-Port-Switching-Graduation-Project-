@@ -33,61 +33,82 @@ class BootstrapManager:
         """Aşama 1: Basit klasik soket. Arayıcıdan dinamik başlangıç portunu teslim alır."""
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(('0.0.0.0', self.discovery_port))
-        s.listen(1)
-        logger.info(f"[BOOTSTRAP Stage 1] Listening on Discovery Port {self.discovery_port}")
-        
-        conn, addr = s.accept()
-        data = conn.recv(8192)
-        
-        port_info = json.loads(data.decode('utf-8'))
-        next_port = port_info['next_port']
-        peer_pub_key_str = port_info['pub_key']
-        logger.info(f"[BOOTSTRAP Stage 1] Received dynamic bootstrap port: {next_port} and Dialer's Public Key")
-        
-        with open(self.peer_pub_key_path, "w") as f:
-            f.write(peer_pub_key_str)
-        self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
-        
-        with open(self.pub_key_path, "r") as f:
-            my_pub_key = f.read()
-            
-        reply_payload = json.dumps({'pub_key': my_pub_key}).encode('utf-8')
-        conn.sendall(reply_payload)
-        
-        conn.close()
-        s.close()
-        return next_port
+        # macOS / Linux üzerinde hızlı yeniden bağlama için SO_REUSEPORT ekle
+        if hasattr(socket, 'SO_REUSEPORT'):
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        conn = None
+        try:
+            s.bind(('0.0.0.0', self.discovery_port))
+            s.listen(1)
+            s.settimeout(120)  # Dialer 120 saniye içinde bağlanmazsa hata ver
+            logger.info(f"[BOOTSTRAP Stage 1] Listening on Discovery Port {self.discovery_port}")
+
+            conn, addr = s.accept()
+            data = conn.recv(8192)
+
+            port_info = json.loads(data.decode('utf-8'))
+            next_port = port_info['next_port']
+            peer_pub_key_str = port_info['pub_key']
+            logger.info(f"[BOOTSTRAP Stage 1] Received dynamic bootstrap port: {next_port} and Dialer's Public Key")
+
+            with open(self.peer_pub_key_path, "w") as f:
+                f.write(peer_pub_key_str)
+            self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
+
+            with open(self.pub_key_path, "r") as f:
+                my_pub_key = f.read()
+
+            reply_payload = json.dumps({'pub_key': my_pub_key}).encode('utf-8')
+            conn.sendall(reply_payload)
+            return next_port
+        finally:
+            if conn:
+                try: conn.close()
+                except: pass
+            try: s.close()
+            except: pass
 
     def run_stage1_dialer(self) -> int:
         """Aşama 1: Arayıcı tarafı dinamik başlangıç portunu iletir."""
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         next_port = random.randint(10000, 20000)
-        
-        # Listener'in açılması biraz sürebileceğinden Dialer için yeniden deneme mantığı
-        for _ in range(5):
-            try:
-                s.connect((self.target_ip, self.discovery_port))
-                break
-            except Exception:
-                time.sleep(1)
-                
-        with open(self.pub_key_path, "r") as f:
-            my_pub_key = f.read()
-            
-        payload = json.dumps({'next_port': next_port, 'pub_key': my_pub_key}).encode('utf-8')
-        s.sendall(payload)
-        
-        data = s.recv(8192)
-        reply_info = json.loads(data.decode('utf-8'))
-        peer_pub_key_str = reply_info['pub_key']
-        
-        with open(self.peer_pub_key_path, "w") as f:
-            f.write(peer_pub_key_str)
-        self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
-        
-        s.close()
-        logger.info(f"[BOOTSTRAP Stage 1] Sent dynamic bootstrap port: {next_port} and received Listener's Public Key")
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            # Listener'in açılması biraz sürebileceğinden Dialer için yeniden deneme mantığı
+            connected = False
+            for attempt in range(10):
+                try:
+                    s.connect((self.target_ip, self.discovery_port))
+                    connected = True
+                    break
+                except Exception:
+                    logger.info(f"[BOOTSTRAP Stage 1] Waiting for Listener... (attempt {attempt+1}/10)")
+                    time.sleep(1)
+                    # Her denemede yeni soket aç (macOS bağlantı hatası sonrası soketi geçersiz sayar)
+                    s.close()
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            if not connected:
+                raise ConnectionError(f"Could not connect to Listener at {self.target_ip}:{self.discovery_port} after 10 attempts.")
+
+            with open(self.pub_key_path, "r") as f:
+                my_pub_key = f.read()
+
+            payload = json.dumps({'next_port': next_port, 'pub_key': my_pub_key}).encode('utf-8')
+            s.sendall(payload)
+
+            data = s.recv(8192)
+            reply_info = json.loads(data.decode('utf-8'))
+            peer_pub_key_str = reply_info['pub_key']
+
+            with open(self.peer_pub_key_path, "w") as f:
+                f.write(peer_pub_key_str)
+            self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
+
+            logger.info(f"[BOOTSTRAP Stage 1] Sent dynamic bootstrap port: {next_port} and received Listener's Public Key")
+            return next_port
+        finally:
+            try: s.close()
+            except: pass
         return next_port
 
     def run_stage2_listener(self, port: int) -> dict:
