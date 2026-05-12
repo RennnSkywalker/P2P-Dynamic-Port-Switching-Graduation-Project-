@@ -33,6 +33,10 @@ def main():
         logger.info(f"Generating RSA Keypair for Peer {args.peer_id}...")
         crypto.generate_keys()
         crypto.save_keys(priv_key_path, pub_key_path)
+    else:
+        crypto.load_private_key(priv_key_path)
+        crypto.sync_public_key_from_private(pub_key_path)
+        logger.info(f"Synchronized public key from private key for Peer {args.peer_id}.")
 
     logger.info("Initiating automatic Out-of-band Public Key Exchange via Discovery Port...")
 
@@ -47,21 +51,21 @@ def main():
             "port_range_min": args.min_port,
             "port_range_max": args.max_port,
             "bootstrap_input_count": 5, 
-            "epoch": time.time() + 5.0 # Her iki tarafın tam senkronize olması için 5sn beklet
+            "start_delay": 5.0
         }
     
     try:
-        bootstrap_params = bm.run_bootstrap_flow(is_dialer, bootstrap_params)
+        bootstrap_params, local_start_delay = bm.run_bootstrap_flow(is_dialer, bootstrap_params)
         logger.info(f"Bootstrap complete. Params: {bootstrap_params}")
     except Exception as e:
         logger.critical(f"Bootstrap sequence failed: {e}")
         return
 
-    # Senkronizasyon (Epoch) başlangıç noktasını bekle
-    wait_time = bootstrap_params['epoch'] - time.time()
-    if wait_time > 0:
-        logger.info(f"Waiting {wait_time:.2f} seconds for synchronization epoch...")
-        time.sleep(wait_time)
+    # Başlatmayı göreli gecikmeyle yap; cihaz saatleri farklı olsa bile iki uç
+    # aynı iletişim adımına daha yakın başlar.
+    if local_start_delay > 0:
+        logger.info(f"Waiting {local_start_delay:.2f} seconds for synchronized startup...")
+        time.sleep(local_start_delay)
 
     # Çekirdek uygulama mantığını başlat
     comm = CommController(args.target_ip, args.peer_id, bootstrap_params, logger, mode=args.mode)

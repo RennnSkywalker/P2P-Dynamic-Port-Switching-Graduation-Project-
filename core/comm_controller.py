@@ -15,7 +15,7 @@ class CommController:
         self.logger = logger
         self.mode = mode
         
-        self.timing = TimingSync(bootstrap_params['timing_interval'], bootstrap_params.get('epoch', 0.0))
+        self.timing = TimingSync(bootstrap_params['timing_interval'])
         self.decision_logic = ProtocolDecisionLogic()
         
         self.active_socket = None

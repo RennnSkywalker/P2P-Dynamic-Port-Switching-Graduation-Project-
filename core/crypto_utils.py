@@ -44,10 +44,25 @@ class CryptoManager:
                 f.read(),
                 password=None
             )
+        self.public_key = self.private_key.public_key()
+        return self.private_key
 
     def load_public_key(self, path):
         with open(path, "rb") as f:
             return serialization.load_pem_public_key(f.read())
+
+    def sync_public_key_from_private(self, pub_path):
+        """Yüklü private key'den public key'i üretip dosyaya yazar."""
+        if not self.private_key:
+            raise ValueError("Private key not loaded.")
+        self.public_key = self.private_key.public_key()
+        os.makedirs(os.path.dirname(pub_path) or ".", exist_ok=True)
+        with open(pub_path, "wb") as f:
+            f.write(self.public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ))
+        return self.public_key
 
     def encrypt_data(self, data: bytes, target_public_key) -> bytes:
         """Hedefin açık anahtarını kullanarak veriyi şifreler."""

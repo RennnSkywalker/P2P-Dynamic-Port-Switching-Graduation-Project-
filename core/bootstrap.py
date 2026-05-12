@@ -113,7 +113,8 @@ class BootstrapManager:
         decrypted_data = self.crypto.decrypt_data(encrypted_data)
         bootstrap_params = json.loads(decrypted_data.decode('utf-8'))
         logger.info(f"[BOOTSTRAP Stage 2] Successfully decrypted Bootstrap Parameters.")
-        return bootstrap_params
+        local_start_delay = max(0.0, float(bootstrap_params.get("start_delay", 0.0)))
+        return bootstrap_params, local_start_delay
 
     def run_stage2_dialer(self, port: int, bootstrap_params: dict):
         """Aşama 2: Parametreleri şifreler ve dinamik port üzerinden gönderir."""
@@ -127,14 +128,21 @@ class BootstrapManager:
                 break
             except Exception:
                 time.sleep(1)
-                
+
+        send_started_at = time.monotonic()
         s.sendall(encrypted_data)
         ack = s.recv(1024)
+        ack_received_at = time.monotonic()
         s.close()
+
+        local_start_delay = max(0.0, float(bootstrap_params.get("start_delay", 0.0)))
         if ack == b"ACK":
+            rtt = ack_received_at - send_started_at
+            local_start_delay = max(0.0, local_start_delay - (rtt / 2.0))
             logger.info("[BOOTSTRAP Stage 2] Payload acknowledged by Listener.")
         else:
             logger.warning("[BOOTSTRAP Stage 2] Failed to get ACK.")
+        return local_start_delay
 
     def run_bootstrap_flow(self, is_dialer: bool, bootstrap_params: dict = None) -> dict:
         """İki aşamalı tam başlangıç (bootstrap) protokolünü çalıştırır."""
@@ -143,9 +151,9 @@ class BootstrapManager:
                 raise ValueError("Dialer must provide bootstrap_params.")
             dyn_port = self.run_stage1_dialer()
             time.sleep(0.5) # Listener'ın bağlanmasını garantile
-            self.run_stage2_dialer(dyn_port, bootstrap_params)
-            return bootstrap_params
+            local_start_delay = self.run_stage2_dialer(dyn_port, bootstrap_params)
+            return bootstrap_params, local_start_delay
         else:
             dyn_port = self.run_stage1_listener()
-            params = self.run_stage2_listener(dyn_port)
-            return params
+            params, local_start_delay = self.run_stage2_listener(dyn_port)
+            return params, local_start_delay
