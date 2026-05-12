@@ -221,3 +221,23 @@
 [2026-05-12 17:16:24] | [INFO] | Synchronized public key from private key for Peer 0.
 [2026-05-12 17:16:24] | [INFO] | Initiating automatic Out-of-band Public Key Exchange via Discovery Port...
 [2026-05-12 17:16:24] | [INFO] | [BOOTSTRAP Stage 1] Listening on Discovery Port 55000
+[2026-05-12 17:40:33] | [INFO] | Generating RSA Keypair for Peer 1...
+[2026-05-12 17:40:33] | [INFO] | Initiating automatic Out-of-band Public Key Exchange via Discovery Port...
+[2026-05-12 17:40:36] | [INFO] | [BOOTSTRAP Stage 1] Sent dynamic bootstrap port: 15226 and received Listener's Public Key
+[2026-05-12 17:40:37] | [INFO] | [BOOTSTRAP Stage 2] Payload acknowledged by Listener.
+[2026-05-12 17:40:37] | [INFO] | Bootstrap complete. Params: {'timing_interval': 10, 'port_range_min': 20000, 'port_range_max': 30000, 'bootstrap_input_count': 5, 'start_delay': 5.0}
+[2026-05-12 17:40:37] | [INFO] | Waiting 4.99 seconds for synchronized startup...
+[2026-05-12 17:40:42] | [INFO] | Starting Communication Controller...
+[2026-05-12 17:40:42] | [INFO] | Interval Reached. Step: 0 | Role: LISTENER | Proto: UDP | Target Port: 24680
+[2026-05-12 17:40:42] | [INFO] | Web UI started at http://localhost:8080
+[2026-05-12 17:40:42] | [INFO] | Chat Interface Started. Ready for Input.
+[2026-05-12 17:40:52] | [INFO] | Interval Reached. Step: 1 | Role: LISTENER | Proto: UDP | Target Port: 27169
+[2026-05-12 17:40:52] | [INFO] | [UDP] Packet dispatched to 192.168.1.6:27170
+[2026-05-12 17:40:55] | [INFO] | [UDP] Packet dispatched to 192.168.1.6:27170
+[2026-05-12 17:41:01] | [INFO] | [UDP] Packet dispatched to 192.168.1.6:27170
+[2026-05-12 17:41:02] | [INFO] | Interval Reached. Step: 2 | Role: LISTENER | Proto: UDP | Target Port: 27123
+[2026-05-12 17:41:12] | [INFO] | Interval Reached. Step: 3 | Role: LISTENER | Proto: UDP | Target Port: 29048
+[2026-05-12 17:41:22] | [INFO] | Interval Reached. Step: 4 | Role: LISTENER | Proto: TCP | Target Port: 26479
+[2026-05-12 17:41:23] | [INFO] | [TCP] Re-handshake successful on port 26479
+[2026-05-12 17:41:32] | [INFO] | Interval Reached. Step: 5 | Role: LISTENER | Proto: UDP | Target Port: 22029
+[2026-05-12 17:41:38] | [INFO] | Shutting down...
