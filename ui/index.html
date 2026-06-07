@@ -21,8 +21,6 @@
     <!-- Connection Lost Banner -->
     <div class="conn-banner" id="connBanner">
       ⚠ Connection Lost — Retrying on new port...
-      <button onclick="reconnect()"
-        style="margin-left:auto;background:rgba(255,255,255,0.2);border:none;color:#fff;padding:3px 10px;border-radius:4px;cursor:pointer;font-size:10px;">Reconnect</button>
     </div>
 
     <!-- TOPBAR -->
@@ -43,8 +41,8 @@
         </div>
         <div class="port-chip" id="portDisplay">Port: 8745</div>
         <div class="chip">Latency: <span id="latVal" style="color:var(--green);margin-left:3px;">42ms</span></div>
-        <div class="chip">TCP&nbsp;/&nbsp;UDP</div>
-        <div class="chip">NTP Synced</div>
+        <div class="chip" id="protoChip">TCP</div>
+        <div class="chip" id="roleChip">LISTENER</div>
       </div>
 
       <!-- Simple: peer info -->
@@ -69,7 +67,6 @@
           <button class="tog-btn active" id="topDarkBtn" onclick="setThemeVariant('dark')">Dark</button>
           <button class="tog-btn" id="topLightBtn" onclick="setThemeVariant('light')">Light</button>
         </div>
-        <button class="icon-btn-top" title="Connection lost" onclick="toggleConnLost()">⚡</button>
         <button class="icon-btn-top" onclick="openSettings()">⚙</button>
       </div>
     </div>
@@ -95,11 +92,8 @@
       <div class="chat-area">
         <div class="chat-messages" id="chatMessages"></div>
         <div class="input-bar">
-          <button class="icon-action" title="Attach">📎</button>
           <input class="chat-input" id="msgInput" placeholder="Type a message…"
             onkeydown="if(event.key==='Enter')sendMessage()">
-          <button class="icon-action adv-only" title="Clear logs" onclick="clearLogs()"
-            style="font-size:11px;font-family:var(--mono-font);">CLR</button>
           <button class="send-btn" onclick="sendMessage()">
             <svg class="send-icon" viewBox="0 0 24 24">
               <path d="M2 21l21-9L2 3v7l15 2-15 2z" />
@@ -132,8 +126,8 @@
 
         <div class="metric-card">
           <div class="metric-label">Data Transferred</div>
-          <div class="metric-val amber" id="mcData">2.3 MB</div>
-          <div class="metric-sub">total</div>
+          <div class="metric-val amber" id="mcData">0 B</div>
+          <div class="metric-sub" id="mcDataSub">sent + received</div>
         </div>
 
         <div class="metric-card">
@@ -181,44 +175,67 @@
         <button class="close-btn" onclick="closeSettings()">✕</button>
       </div>
 
-      <div class="settings-row">
-        <span class="settings-key">Port Switch Interval</span>
-        <span class="settings-val">10s (varsayılan)</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">Deterministic Algorithm</span>
-        <span class="settings-val">SHA-256</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">NTP Sync</span>
-        <button class="toggle-switch" id="ntpToggle" onclick="this.classList.toggle('off')"></button>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">Auto-reconnect</span>
-        <button class="toggle-switch" onclick="this.classList.toggle('off')"></button>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">Bootstrap Encryption</span>
-        <span class="settings-val">RSA-2048 (OAEP)</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">Port Range</span>
-        <span class="settings-val">20000 – 30000</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">Show packet info</span>
-        <button class="toggle-switch" onclick="this.classList.toggle('off')"></button>
-      </div>
-      <div class="settings-row">
-        <span class="settings-key">Export format</span>
-        <span class="settings-val">JSON / CSV</span>
-      </div>
+        <div class="settings-row">
+          <span class="settings-key">Port Switch Interval</span>
+          <span class="settings-val" id="setIntervalVal">10s</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-key">Deterministic Algorithm</span>
+          <span class="settings-val">SHA-256</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-key">Sync Model</span>
+          <span class="settings-val">Monotonic step sync</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-key">Bootstrap Encryption</span>
+          <span class="settings-val">RSA-2048 + AES-256-GCM</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-key">Current Protocol</span>
+          <span class="settings-val" id="setProtoVal">TCP</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-key">Current Role</span>
+          <span class="settings-val" id="setRoleVal">LISTENER</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-key">Current Step</span>
+          <span class="settings-val" id="setStepVal">0</span>
+        </div>
 
-      <div style="margin-top:16px;display:flex;gap:8px;">
+        <!-- Pending Config Banner -->
+        <div class="cfg-pending-banner" id="cfgPendingBanner" style="display:none;">
+          ⏳ <span id="cfgPendingText">Pending...</span>
+        </div>
+
+        <div class="settings-section-title">Runtime Controls</div>
+
+        <!-- Mode Switch -->
+        <div class="settings-row">
+          <span class="settings-key">Protocol Mode</span>
+          <div class="cfg-toggle-group" id="cfgModeGroup">
+            <button class="cfg-btn" data-mode="TCP" onclick="sendModeChange('TCP')">TCP</button>
+            <button class="cfg-btn" data-mode="UDP" onclick="sendModeChange('UDP')">UDP</button>
+            <button class="cfg-btn" data-mode="AUTO" onclick="sendModeChange('AUTO')">AUTO</button>
+          </div>
+        </div>
+
+        <!-- Port Range -->
+        <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+          <span class="settings-key">Port Range</span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <input class="cfg-input" type="number" id="cfgMinPort" placeholder="Min" min="1024" max="65535">
+            <span class="settings-key" style="margin:0;">—</span>
+            <input class="cfg-input" type="number" id="cfgMaxPort" placeholder="Max" min="1024" max="65535">
+            <button class="cfg-apply-btn" onclick="sendPortRangeChange()">Apply</button>
+          </div>
+          <div class="cfg-range-hint" id="cfgRangeHint">Current: <span id="setPortRangeVal">20000 – 30000</span></div>
+        </div>
+
+      <div style="margin-top:16px;">
         <button onclick="closeSettings()"
-          style="flex:1;padding:9px;border-radius:8px;background:var(--accent);border:none;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:500;">Save</button>
-        <button onclick="closeSettings()"
-          style="flex:1;padding:9px;border-radius:8px;background:var(--surface2);border:0.5px solid var(--border2);color:var(--text2);cursor:pointer;font-family:'DM Sans',sans-serif;">Cancel</button>
+          style="width:100%;padding:9px;border-radius:8px;background:var(--surface2);border:0.5px solid var(--border2);color:var(--text2);cursor:pointer;font-family:'DM Sans',sans-serif;">Close</button>
       </div>
     </div>
   </div>

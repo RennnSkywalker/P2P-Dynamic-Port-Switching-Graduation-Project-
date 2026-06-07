@@ -34,7 +34,8 @@ def launch_instance(peer_id, interval, web_port):
                         subprocess.Popen([term, "-e", f"{interpreter} {script} {' '.join(args)}"])
                     launched = True
                     break
-                except Exception:
+                except Exception as e:
+                    print(f"[UYARI] {term} ile yeni terminal açılamadı: {e}")
                     continue
         if not launched:
             print("[HATA] Linux'ta desteklenen varsayılan bir terminal emulatorü (gnome-terminal, xterm vb.) bulunamadı.")

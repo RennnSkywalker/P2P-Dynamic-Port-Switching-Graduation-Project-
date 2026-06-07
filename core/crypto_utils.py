@@ -1,6 +1,7 @@
 import os
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 class CryptoManager:
     def __init__(self, key_size=2048):
@@ -76,6 +77,19 @@ class CryptoManager:
         )
         return ciphertext
 
+    def encrypt_hybrid(self, data: bytes, target_public_key) -> dict:
+        """Veriyi AES ile, AES anahtarını da RSA ile şifreler."""
+        aes_key = AESGCM.generate_key(bit_length=256)
+        aesgcm = AESGCM(aes_key)
+        nonce = os.urandom(12)
+        ciphertext = aesgcm.encrypt(nonce, data, None)
+        encrypted_key = self.encrypt_data(aes_key, target_public_key)
+        return {
+            "encrypted_key": encrypted_key,
+            "nonce": nonce,
+            "ciphertext": ciphertext,
+        }
+
     def decrypt_data(self, ciphertext: bytes) -> bytes:
         """Kendi gizli anahtarımızı kullanarak verinin şifresini çözer."""
         if not self.private_key:
@@ -89,3 +103,9 @@ class CryptoManager:
             )
         )
         return plaintext
+
+    def decrypt_hybrid(self, encrypted_key: bytes, nonce: bytes, ciphertext: bytes) -> bytes:
+        """RSA ile açılan AES anahtarıyla veriyi çözer."""
+        aes_key = self.decrypt_data(encrypted_key)
+        aesgcm = AESGCM(aes_key)
+        return aesgcm.decrypt(nonce, ciphertext, None)

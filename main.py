@@ -3,6 +3,7 @@ import sys
 import os
 import time
 import threading
+import uuid
 from core.crypto_utils import CryptoManager
 from core.logger import setup_logger
 from core.bootstrap import BootstrapManager
@@ -14,14 +15,73 @@ def setup_args():
     parser.add_argument("--peer-id", type=int, choices=[0, 1], required=True)
     parser.add_argument("--target-ip", type=str, default="127.0.0.1")
     parser.add_argument("--mode", type=str, choices=["TCP", "UDP", "AUTO"], default="AUTO")
-    parser.add_argument("--interval", type=int, default=10)
+    parser.add_argument("--interval", type=int, default=5)
     parser.add_argument("--min-port", type=int, default=20000)
     parser.add_argument("--max-port", type=int, default=30000)
     parser.add_argument("--web-port", type=int, default=8080, help="Web UI sunucu portu")
     parser.add_argument("--discovery-port", type=int, default=55000,
-                        help="Out-of-band bootstrap keşif portu (varsayılan: 55000). "
-                             "macOS 12+ sistemlerde port 5000 AirPlay tarafından kullanılır.")
+                        help="Bootstrap keşif portu (varsayılan: 55000). "
+                             "Port 5000 Windows/macOS'ta çakışabilir.")
     return parser.parse_args()
+
+def _handle_command(cmd, comm, logger):
+    """Terminal komutlarını ayrıştırır ve ilgili işlemi tetikler."""
+    parts = cmd.split()
+    keyword = parts[0].lower()
+
+    if keyword == "/mode" and len(parts) == 2:
+        mode = parts[1].upper()
+        if mode in ("TCP", "UDP", "AUTO"):
+            step = comm.send_config_update({"mode": mode})
+            if step is not None:
+                print(f"  ✓ Mod değişikliği '{mode}' step {step}'te uygulanacak")
+            else:
+                print("  ✗ Geçersiz mod değişikliği")
+        else:
+            print("  Kullanım: /mode TCP|UDP|AUTO")
+
+    elif keyword == "/set" and len(parts) >= 3:
+        if parts[1].lower() == "port-range" and len(parts) == 3:
+            try:
+                min_s, max_s = parts[2].split("-")
+                min_p, max_p = int(min_s), int(max_s)
+                if not (1024 <= min_p < max_p <= 65535):
+                    print("  ✗ Geçersiz aralık (1024-65535 arası, min < max)")
+                    return
+                step = comm.send_config_update({"port_range_min": min_p, "port_range_max": max_p})
+                if step is not None:
+                    print(f"  ✓ Port aralığı {min_p}-{max_p} step {step}'te uygulanacak")
+                else:
+                    print("  ✗ Geçersiz port aralığı")
+            except ValueError:
+                print("  Kullanım: /set port-range MIN-MAX (örn: /set port-range 15000-25000)")
+        else:
+            print("  Kullanım: /set port-range MIN-MAX")
+
+    elif keyword == "/status":
+        state = comm.get_state()
+        pending = comm.get_pending_config_info()
+        print(f"\n  Durum: {'Bağlı ✓' if state['connected'] else 'Bağlantı yok ✗'}")
+        print(f"  Port: {state['current_port']} | Peer Port: {state.get('peer_port', '—')}")
+        print(f"  Protokol: {state['protocol']} | Rol: {state['role']} | Step: {state['step']}")
+        print(f"  Mod: {state.get('mode', comm.mode)}")
+        print(f"  Port Aralığı: {comm.bootstrap_params['port_range_min']}-{comm.bootstrap_params['port_range_max']}")
+        print(f"  Gecikme: {state['latency_ms']}ms | Kayıp: {state['loss_rate']}%")
+        print(f"  Uptime: {state['uptime']}s | Mesaj: {state['msg_count']}")
+        if pending:
+            print(f"  ⏳ Bekleyen Değişiklikler: {pending}")
+        print()
+
+    elif keyword == "/help":
+        print("\n  Komutlar:")
+        print("  /mode TCP|UDP|AUTO     — Protokol modunu değiştir (her iki tarafta)")
+        print("  /set port-range MIN-MAX — Port aralığını değiştir (her iki tarafta)")
+        print("  /status                — Anlık sistem durumunu göster")
+        print("  /help                  — Bu yardım mesajını göster")
+        print("  exit | quit            — Programı kapat\n")
+
+    else:
+        print(f"  Bilinmeyen komut: {parts[0]}. /help yazın.")
 
 def main():
     args = setup_args()
@@ -54,8 +114,11 @@ def main():
             "timing_interval": args.interval,
             "port_range_min": args.min_port,
             "port_range_max": args.max_port,
+            "mode": args.mode,
             "bootstrap_input_count": 5, 
-            "start_delay": 5.0
+            "start_delay": 5.0,
+            "session_seed": str(uuid.uuid4()),
+            "session_start_at": time.time() + 5.0
         }
     
     try:
@@ -65,14 +128,23 @@ def main():
         logger.critical(f"Bootstrap sequence failed: {e}")
         return
 
-    # Başlatmayı göreli gecikmeyle yap; cihaz saatleri farklı olsa bile iki uç
-    # aynı iletişim adımına daha yakın başlar.
-    if local_start_delay > 0:
-        logger.info(f"Waiting {local_start_delay:.2f} seconds for synchronized startup...")
-        time.sleep(local_start_delay)
+    session_start_monotonic = time.monotonic() + local_start_delay
+    logger.info(
+        f"Session epoch armed. Local synchronized start in {local_start_delay:.2f} seconds."
+    )
 
     # Çekirdek uygulama mantığını başlat
-    comm = CommController(args.target_ip, args.peer_id, bootstrap_params, logger, mode=args.mode)
+    # Mod: Dialer'ın bootstrap_params içinde gönderdiği değeri kullan
+    effective_mode = bootstrap_params.get("mode", args.mode)
+
+    comm = CommController(
+        args.target_ip,
+        args.peer_id,
+        bootstrap_params,
+        logger,
+        mode=effective_mode,
+        session_start_monotonic=session_start_monotonic,
+    )
     comm.start()
 
     # Web UI sunucusunu başlat
@@ -94,22 +166,25 @@ def main():
                 for m in msgs:
                     # Yeşil renk için ANSI kodlaması
                     print(f"\n\033[92m[Peer {1 - args.peer_id}]: {m}\033[0m")
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Message printer loop encountered an error: {e}")
             time.sleep(0.5)
 
     threading.Thread(target=print_messages, daemon=True).start()
 
-    logger.info("Chat Interface Started. Ready for Input.")
+    logger.info("Chat Interface Started. Ready for Input. Type /help for commands.")
     try:
         while True:
             line = input()
-            if line.strip().lower() in ("exit", "quit"):
+            stripped = line.strip()
+            if stripped.lower() in ("exit", "quit"):
                 break
-            if line.strip():
-                comm.send_message(line.strip())
+            if stripped.startswith("/"):
+                _handle_command(stripped, comm, logger)
+            elif stripped:
+                comm.send_message(stripped)
     except KeyboardInterrupt:
-        pass
+        logger.info("Keyboard interrupt received. Shutting down interactive session.")
     finally:
         logger.info("Shutting down...")
         comm.stop()

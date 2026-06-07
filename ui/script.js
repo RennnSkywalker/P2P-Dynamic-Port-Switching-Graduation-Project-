@@ -15,6 +15,7 @@ let uptimeSeconds  = 0;
 let lastMsgIndex   = 0;
 let allMessages    = [];
 let logs           = [];
+let logClearOffset  = 0;
 let backendInfo    = {};
 
 /* Mod başına tema hafızası */
@@ -58,6 +59,19 @@ function escapeHtml(text) {
   return d.innerHTML;
 }
 
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
+}
+
 /* ---- GERÇEK API POLLING ---- */
 async function pollStatus() {
   try {
@@ -96,6 +110,8 @@ async function pollStatus() {
     document.getElementById('latVal').textContent    = data.latency_ms + 'ms';
     document.getElementById('mcLat').textContent     = data.latency_ms + 'ms';
     document.getElementById('mcLoss').textContent    = data.loss_rate + '%';
+    document.getElementById('mcData').textContent    = formatBytes(data.data_transferred || 0);
+    document.getElementById('mcDataSub').textContent = `${formatBytes(data.bytes_sent || 0)} sent / ${formatBytes(data.bytes_received || 0)} recv`;
 
     /* Uptime */
     const h = Math.floor(uptimeSeconds / 3600);
@@ -107,9 +123,40 @@ async function pollStatus() {
     document.getElementById('mPorts').style.width = Math.min(portSwitches * 5, 100) + '%';
     document.getElementById('mMsgs').style.width  = Math.min(msgTotal * 4, 100) + '%';
 
-    /* Protokol çipi güncelle */
-    const protoChip = document.querySelector('.status-chips .chip:nth-child(4)');
-    if (protoChip) protoChip.textContent = data.protocol || 'TCP';
+    /* Canlı durum ve ayarlar */
+    document.getElementById('protoChip').textContent = data.protocol || 'TCP';
+    document.getElementById('roleChip').textContent = data.role || '—';
+    document.getElementById('setIntervalVal').textContent = (data.interval || 0) + 's';
+    document.getElementById('setProtoVal').textContent = data.protocol || 'TCP';
+    document.getElementById('setPortRangeVal').textContent = `${data.port_range_min} – ${data.port_range_max}`;
+    document.getElementById('setRoleVal').textContent = data.role || '—';
+    document.getElementById('setStepVal').textContent = data.step ?? '—';
+
+    /* Mod butonlarını senkronize et */
+    const currentMode = data.mode || 'AUTO';
+    document.querySelectorAll('#cfgModeGroup .cfg-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === currentMode);
+    });
+
+    /* Port range inputlarına placeholder olarak mevcut değerleri koy */
+    const minInput = document.getElementById('cfgMinPort');
+    const maxInput = document.getElementById('cfgMaxPort');
+    if (!minInput.matches(':focus')) minInput.placeholder = data.port_range_min;
+    if (!maxInput.matches(':focus')) maxInput.placeholder = data.port_range_max;
+
+    /* Bekleyen config değişiklikleri banner */
+    const pendingBanner = document.getElementById('cfgPendingBanner');
+    if (data.pending_config) {
+      const entries = Object.entries(data.pending_config);
+      const parts = entries.map(([step, changes]) => {
+        const desc = Object.entries(changes).map(([k,v]) => `${k}=${v}`).join(', ');
+        return `Step ${step}: ${desc}`;
+      });
+      document.getElementById('cfgPendingText').textContent = parts.join(' | ');
+      pendingBanner.style.display = 'flex';
+    } else {
+      pendingBanner.style.display = 'none';
+    }
 
   } catch (e) { /* sunucu henüz hazır değil */ }
 }
@@ -130,7 +177,8 @@ async function pollLogs() {
   try {
     const res = await fetch('/api/logs');
     const data = await res.json();
-    logs = data.logs;
+    const allLogs = data.logs || [];
+    logs = allLogs.slice(logClearOffset);
     if (currentMode === 'advanced') renderLogs();
   } catch (e) {}
 }
@@ -204,23 +252,12 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove('show'), 2500);
 }
 
-/* ---- BAĞLANTI KOPMA ---- */
-function toggleConnLost() {
-  connLost = !connLost;
-  document.getElementById('connBanner').classList.toggle('show', connLost);
-  document.getElementById('statusDot').className  = connLost ? 'dot dot-red'   : 'dot dot-green';
-  document.getElementById('statusText').textContent = connLost ? 'Disconnected' : 'Connected';
-}
-
-function reconnect() {
-  connLost = false;
-  document.getElementById('connBanner').classList.remove('show');
-  document.getElementById('statusDot').className   = 'dot dot-green';
-  document.getElementById('statusText').textContent = 'Connected';
-}
-
 /* ---- LOG TEMİZLEME & DIŞA AKTARMA ---- */
-function clearLogs() { logs = []; renderLogs(); }
+function clearLogs() {
+  logClearOffset += logs.length;
+  logs = [];
+  renderLogs();
+}
 
 function exportLogs() {
   const blob = new Blob([JSON.stringify(logs, null, 2)], { type:'application/json' });
@@ -234,6 +271,57 @@ function exportLogs() {
 /* ---- AYARLAR PANELİ ---- */
 function openSettings()  { document.getElementById('settingsOverlay').classList.add('open'); }
 function closeSettings() { document.getElementById('settingsOverlay').classList.remove('open'); }
+
+/* ---- CONFIG DEĞİŞİKLİKLERİ ---- */
+async function sendModeChange(mode) {
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes: { mode } })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`Mode → ${mode} (applies at step ${data.effective_step})`);
+    } else {
+      showToast(`Error: ${data.error || 'Failed to change mode'}`);
+    }
+  } catch (e) {
+    console.error('Config update failed:', e);
+  }
+}
+
+async function sendPortRangeChange() {
+  const minVal = document.getElementById('cfgMinPort').value;
+  const maxVal = document.getElementById('cfgMaxPort').value;
+  if (!minVal || !maxVal) {
+    showToast('Please enter Min and Max port values');
+    return;
+  }
+  const min_p = parseInt(minVal, 10);
+  const max_p = parseInt(maxVal, 10);
+  if (isNaN(min_p) || isNaN(max_p) || min_p >= max_p || min_p < 1024 || max_p > 65535) {
+    showToast('Invalid port range (1024-65535, min < max)');
+    return;
+  }
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes: { port_range_min: min_p, port_range_max: max_p } })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`Port: ${min_p}-${max_p} (applies at step ${data.effective_step})`);
+      document.getElementById('cfgMinPort').value = '';
+      document.getElementById('cfgMaxPort').value = '';
+    } else {
+      showToast(`Error: ${data.error || 'Failed to change port range'}`);
+    }
+  } catch (e) {
+    console.error('Config update failed:', e);
+  }
+}
 
 /* ---- BAŞLATMA ---- */
 renderMessages();

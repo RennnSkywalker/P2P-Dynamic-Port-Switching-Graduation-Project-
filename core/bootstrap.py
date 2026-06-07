@@ -4,6 +4,7 @@ import logging
 import random
 import time
 import os
+import base64
 from .crypto_utils import CryptoManager
 
 logger = logging.getLogger("SystemLog")
@@ -24,116 +25,156 @@ class BootstrapManager:
             self.peer_public_key = self.crypto.load_public_key(peer_pub_key_path)
         else:
             self.peer_public_key = None
-
-        # macOS 12+ varsayılan olarak port 5000'i AirPlay Receiver için kullanır.
-        # Bu nedenle varsayılan keşif portu 55000 olarak ayarlandı.
+            
         self.discovery_port = discovery_port
+        self.connect_timeout = 2.0
+        self.accept_timeout = 10.0
+        self.recv_timeout = 10.0
+
+    @staticmethod
+    def _recv_exact(sock, length: int) -> bytes:
+        chunks = bytearray()
+        while len(chunks) < length:
+            piece = sock.recv(length - len(chunks))
+            if not piece:
+                raise ConnectionError("Socket closed while reading bootstrap frame")
+            chunks.extend(piece)
+        return bytes(chunks)
+
+    def _recv_framed(self, sock) -> bytes:
+        length = int.from_bytes(self._recv_exact(sock, 4), 'big')
+        return self._recv_exact(sock, length)
+
+    @staticmethod
+    def _send_framed(sock, payload: bytes):
+        sock.sendall(len(payload).to_bytes(4, 'big') + payload)
 
     def run_stage1_listener(self) -> int:
         """Aşama 1: Basit klasik soket. Arayıcıdan dinamik başlangıç portunu teslim alır."""
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # macOS / Linux üzerinde hızlı yeniden bağlama için SO_REUSEPORT ekle
-        if hasattr(socket, 'SO_REUSEPORT'):
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        conn = None
+        s.settimeout(self.accept_timeout)
+        s.bind(('0.0.0.0', self.discovery_port))
+        s.listen(1)
+        logger.info(f"[BOOTSTRAP Stage 1] Listening on Discovery Port {self.discovery_port}")
+        
         try:
-            s.bind(('0.0.0.0', self.discovery_port))
-            s.listen(1)
-            s.settimeout(120)  # Dialer 120 saniye içinde bağlanmazsa hata ver
-            logger.info(f"[BOOTSTRAP Stage 1] Listening on Discovery Port {self.discovery_port}")
-
             conn, addr = s.accept()
-            data = conn.recv(8192)
+        except socket.timeout as exc:
+            s.close()
+            raise TimeoutError("Timed out waiting for stage 1 dialer connection") from exc
 
-            port_info = json.loads(data.decode('utf-8'))
-            next_port = port_info['next_port']
-            peer_pub_key_str = port_info['pub_key']
-            logger.info(f"[BOOTSTRAP Stage 1] Received dynamic bootstrap port: {next_port} and Dialer's Public Key")
-
-            with open(self.peer_pub_key_path, "w") as f:
-                f.write(peer_pub_key_str)
-            self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
-
-            with open(self.pub_key_path, "r") as f:
-                my_pub_key = f.read()
-
-            reply_payload = json.dumps({'pub_key': my_pub_key}).encode('utf-8')
-            conn.sendall(reply_payload)
-            return next_port
-        finally:
-            if conn:
-                try: conn.close()
-                except: pass
-            try: s.close()
-            except: pass
+        conn.settimeout(self.recv_timeout)
+        data = self._recv_framed(conn)
+        
+        port_info = json.loads(data.decode('utf-8'))
+        next_port = port_info['next_port']
+        peer_pub_key_str = port_info['pub_key']
+        logger.info(f"[BOOTSTRAP Stage 1] Received dynamic bootstrap port: {next_port} and Dialer's Public Key")
+        
+        with open(self.peer_pub_key_path, "w") as f:
+            f.write(peer_pub_key_str)
+        self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
+        
+        with open(self.pub_key_path, "r") as f:
+            my_pub_key = f.read()
+            
+        reply_payload = json.dumps({'pub_key': my_pub_key}).encode('utf-8')
+        self._send_framed(conn, reply_payload)
+        
+        conn.close()
+        s.close()
+        return next_port
 
     def run_stage1_dialer(self) -> int:
         """Aşama 1: Arayıcı tarafı dinamik başlangıç portunu iletir."""
-        next_port = random.randint(10000, 20000)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            # Listener'in açılması biraz sürebileceğinden Dialer için yeniden deneme mantığı
-            connected = False
-            for attempt in range(10):
+        s.settimeout(self.connect_timeout)
+        next_port = random.randint(10000, 20000)
+        connected = False
+        
+        # Listener'in açılması biraz sürebileceğinden Dialer için yeniden deneme mantığı
+        for _ in range(5):
+            try:
+                s.connect((self.target_ip, self.discovery_port))
+                connected = True
+                break
+            except OSError as e:
+                logger.warning(
+                    f"[BOOTSTRAP Stage 1] Discovery connect attempt failed for {self.target_ip}:{self.discovery_port}: {e}"
+                )
                 try:
-                    s.connect((self.target_ip, self.discovery_port))
-                    connected = True
-                    break
-                except Exception:
-                    logger.info(f"[BOOTSTRAP Stage 1] Waiting for Listener... (attempt {attempt+1}/10)")
-                    time.sleep(1)
-                    # Her denemede yeni soket aç (macOS bağlantı hatası sonrası soketi geçersiz sayar)
                     s.close()
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                except OSError:
+                    logger.debug("[BOOTSTRAP Stage 1] Failed to close discovery socket after connect error.")
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(self.connect_timeout)
+                time.sleep(1)
 
-            if not connected:
-                raise ConnectionError(f"Could not connect to Listener at {self.target_ip}:{self.discovery_port} after 10 attempts.")
-
-            with open(self.pub_key_path, "r") as f:
-                my_pub_key = f.read()
-
-            payload = json.dumps({'next_port': next_port, 'pub_key': my_pub_key}).encode('utf-8')
-            s.sendall(payload)
-
-            data = s.recv(8192)
-            reply_info = json.loads(data.decode('utf-8'))
-            peer_pub_key_str = reply_info['pub_key']
-
-            with open(self.peer_pub_key_path, "w") as f:
-                f.write(peer_pub_key_str)
-            self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
-
-            logger.info(f"[BOOTSTRAP Stage 1] Sent dynamic bootstrap port: {next_port} and received Listener's Public Key")
-            return next_port
-        finally:
-            try: s.close()
-            except: pass
+        if not connected:
+            s.close()
+            raise ConnectionError(
+                f"Could not connect to discovery port {self.discovery_port} on {self.target_ip}"
+            )
+                
+        with open(self.pub_key_path, "r") as f:
+            my_pub_key = f.read()
+            
+        payload = json.dumps({'next_port': next_port, 'pub_key': my_pub_key}).encode('utf-8')
+        self._send_framed(s, payload)
+        
+        s.settimeout(self.recv_timeout)
+        data = self._recv_framed(s)
+        reply_info = json.loads(data.decode('utf-8'))
+        peer_pub_key_str = reply_info['pub_key']
+        
+        with open(self.peer_pub_key_path, "w") as f:
+            f.write(peer_pub_key_str)
+        self.peer_public_key = self.crypto.load_public_key(self.peer_pub_key_path)
+        
+        s.close()
+        logger.info(f"[BOOTSTRAP Stage 1] Sent dynamic bootstrap port: {next_port} and received Listener's Public Key")
         return next_port
 
     def run_stage2_listener(self, port: int) -> dict:
         """Aşama 2: Dinamik portu dinler, RSA ile şifrelenmiş veri paketini alır ve çözer."""
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.settimeout(self.accept_timeout)
         # Güvenli bir şekilde bağla (Bind)
+        bind_deadline = time.monotonic() + 10.0
         while True:
             try:
                 s.bind(('0.0.0.0', port))
                 break
-            except Exception as e:
+            except OSError as e:
+                if time.monotonic() >= bind_deadline:
+                    s.close()
+                    raise TimeoutError(f"Timed out binding encrypted bootstrap port {port}") from e
                 logger.error(f"Bind failed on {port}: {e}, retrying...")
                 time.sleep(1)
         
         s.listen(1)
         logger.info(f"[BOOTSTRAP Stage 2] Listening for encrypted parameters on {port}...")
         
-        conn, addr = s.accept()
-        encrypted_data = conn.recv(4096)
+        try:
+            conn, addr = s.accept()
+        except socket.timeout as exc:
+            s.close()
+            raise TimeoutError(f"Timed out waiting for encrypted bootstrap payload on {port}") from exc
+
+        conn.settimeout(self.recv_timeout)
+        encrypted_data = self._recv_framed(conn)
         conn.sendall(b"ACK")
         conn.close()
         s.close()
-        
-        decrypted_data = self.crypto.decrypt_data(encrypted_data)
+
+        payload = json.loads(encrypted_data.decode('utf-8'))
+        decrypted_data = self.crypto.decrypt_hybrid(
+            base64.b64decode(payload['encrypted_key']),
+            base64.b64decode(payload['nonce']),
+            base64.b64decode(payload['ciphertext'])
+        )
         bootstrap_params = json.loads(decrypted_data.decode('utf-8'))
         logger.info(f"[BOOTSTRAP Stage 2] Successfully decrypted Bootstrap Parameters.")
         local_start_delay = max(0.0, float(bootstrap_params.get("start_delay", 0.0)))
@@ -141,19 +182,46 @@ class BootstrapManager:
 
     def run_stage2_dialer(self, port: int, bootstrap_params: dict):
         """Aşama 2: Parametreleri şifreler ve dinamik port üzerinden gönderir."""
+        bootstrap_params["session_start_at"] = time.time() + max(
+            0.0, float(bootstrap_params.get("start_delay", 0.0))
+        )
         plaintext = json.dumps(bootstrap_params).encode('utf-8')
-        encrypted_data = self.crypto.encrypt_data(plaintext, self.peer_public_key)
+        encrypted_payload = self.crypto.encrypt_hybrid(plaintext, self.peer_public_key)
+        encrypted_data = json.dumps({
+            'encrypted_key': base64.b64encode(encrypted_payload['encrypted_key']).decode('ascii'),
+            'nonce': base64.b64encode(encrypted_payload['nonce']).decode('ascii'),
+            'ciphertext': base64.b64encode(encrypted_payload['ciphertext']).decode('ascii')
+        }).encode('utf-8')
         
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(self.connect_timeout)
+        connected = False
         for _ in range(5):
             try:
                 s.connect((self.target_ip, port))
+                connected = True
                 break
-            except Exception:
+            except OSError as e:
+                logger.warning(
+                    f"[BOOTSTRAP Stage 2] Encrypted channel connect attempt failed for {self.target_ip}:{port}: {e}"
+                )
+                try:
+                    s.close()
+                except OSError:
+                    logger.debug("[BOOTSTRAP Stage 2] Failed to close encrypted bootstrap socket after connect error.")
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(self.connect_timeout)
                 time.sleep(1)
 
+        if not connected:
+            s.close()
+            raise ConnectionError(
+                f"Could not connect to encrypted bootstrap port {port} on {self.target_ip}"
+            )
+
         send_started_at = time.monotonic()
-        s.sendall(encrypted_data)
+        self._send_framed(s, encrypted_data)
+        s.settimeout(self.recv_timeout)
         ack = s.recv(1024)
         ack_received_at = time.monotonic()
         s.close()
@@ -164,7 +232,7 @@ class BootstrapManager:
             local_start_delay = max(0.0, local_start_delay - (rtt / 2.0))
             logger.info("[BOOTSTRAP Stage 2] Payload acknowledged by Listener.")
         else:
-            logger.warning("[BOOTSTRAP Stage 2] Failed to get ACK.")
+            logger.warning(f"[BOOTSTRAP Stage 2] Unexpected ACK payload: {ack!r}")
         return local_start_delay
 
     def run_bootstrap_flow(self, is_dialer: bool, bootstrap_params: dict = None) -> dict:

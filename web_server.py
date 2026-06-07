@@ -75,6 +75,19 @@ def create_handler(comm, peer_id, bootstrap_params):
                 if text:
                     comm.send_message(text)
                 self._send_json({'ok': True})
+            elif self.path == '/api/config':
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length)
+                data = json.loads(body.decode('utf-8'))
+                changes = data.get('changes', {})
+                if changes:
+                    effective_step = comm.send_config_update(changes)
+                    if effective_step is not None:
+                        self._send_json({'ok': True, 'effective_step': effective_step})
+                    else:
+                        self._send_json({'ok': False, 'error': 'Invalid config changes'})
+                else:
+                    self._send_json({'ok': False, 'error': 'No changes provided'})
             else:
                 self.send_error(404)
 
